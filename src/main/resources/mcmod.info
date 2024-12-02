@@ -1,0 +1,16 @@
+[
+{
+  "modid": "fluidic_arm",
+  "name": "Fluidic Arm",
+  "description": "Adds new fluidic arm covers whichs transfers both items and fluids at once.",
+  "version": "${version}",
+  "mcversion": "${mcversion}",
+  "url": "",
+  "updateUrl": "",
+  "authorList": ["Cyber"],
+  "credits": "",
+  "logoFile": "",
+  "screenshots": [],
+  "dependencies": ["gregtech"]
+}
+]

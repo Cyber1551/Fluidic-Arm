@@ -1,0 +1,12 @@
+metaitem.fluidic_arm.lv.name=LV Fluidic Arm
+metaitem.fluidic_arm.mv.name=MV Fluidic Arm
+metaitem.fluidic_arm.hv.name=HV Fluidic Arm
+metaitem.fluidic_arm.ev.name=EV Fluidic Arm
+metaitem.fluidic_arm.iv.name=IV Fluidic Arm
+metaitem.fluidic_arm.luv.name=LuV Fluidic Arm
+metaitem.fluidic_arm.zpm.name=ZPM Fluidic Arm
+metaitem.fluidic_arm.uv.name=UV Fluidic Arm
+metaitem.fluidic_arm.tooltip=Transfers §fItems§7 and §fFluids§7 at specific rates as §fCover§7.
+
+metaitem.fluidic_arm.covermode.item=Cover Mode/n§7Displaying §6Robotic Arm§7 Settings
+metaitem.fluidic_arm.covermode.fluid=Cover Mode/n§7Displaying §9Fluid Regulator§7 Settings
