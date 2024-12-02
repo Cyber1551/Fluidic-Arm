@@ -19,11 +19,9 @@ It allows transfer of both <font color="orange">items</font> and <font color="sk
 
 Additionally, some minor UI tweaks have been made for a more consistent experience.
 
-<img src="/img/robotarm.png" alt="image" width="300">
-<img src="/img/fluidregulator.png" alt="image" width="300">
+<img src="/img/robotarm.png" alt="image" width="250"> <img src="/img/fluidregulator.png" alt="image" width="250">
 <br />
-<img src="/img/robotarm_btn.png" alt="image" width="300">
-<img src="/img/fluidregulator_btn.png" alt="image" width="300">
+<img src="/img/robotarm_btn.png" alt="image" width="250"> <img src="/img/fluidregulator_btn.png" alt="image" width="250">
 
 
  
