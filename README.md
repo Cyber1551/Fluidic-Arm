@@ -16,7 +16,7 @@ See [Releases]() for the compiled jars.
 The `Fluidic Arm` cover combines the functionality of a `Robotic Arm` and a `Fluid Regulator`. 
 
 
-It allows transfer of both <span style="color:orange">items</span> and <span style="color:skyblue">fluids</span> between machines.
+It allows transfer of both **items** and **fluids** between machines.
 
 Additionally, some minor UI tweaks have been made for a more consistent experience.
 
