@@ -9,7 +9,9 @@ A [GregTech: Community Edition Unofficial](https://www.curseforge.com/minecraft/
 
 I created this to help with some logistics problems I was having in the [Nomifactory](https://www.curseforge.com/minecraft/modpacks/nomifactory) modpack.
 
-See [Releases]() for the compiled jars.
+See [Releases](https://github.com/Cyber1551/Fluidic-Arm/releases) for the compiled jars.
+
+<img src="/img/icons.png" alt="image" width="500">
 
 ## Features
 
@@ -40,6 +42,10 @@ general {
 
 The default recipe type is `normal` which follows the same pattern as gregtech; a 3x3 crafting recipe as well as assembler and assembly line recipes with necessary research. 
 
+<img src="/img/3x3.png" alt="image" width="250"><br /><img src="/img/assemblyline.png" alt="image" width="250">
+
 The `easy` option generates a recipe that can be crafted in a 2x2 crafting grid or an assembler.
+
+<img src="/img/2x2.png" alt="image" width="250">
 
 The `none` option disables all recipes for the cover. Useful if you are making a custom pack and want to add your own recipes.

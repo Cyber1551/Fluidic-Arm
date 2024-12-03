@@ -102,52 +102,57 @@ public class FluidicArmRecipes {
         if (recipeType.equals("normal")) {
             ModHandler.addShapedRecipe("fluidic_arm.lv.normal", FluidicArmMetaItems.FLUIDIC_ARM_LV.getStackForm(),
                     "WWW",
-                    "MSM",
-                    "RCS",
+                    "RSM",
+                    "PCS",
                     'W', new UnificationEntry(cableGtSingle, Tin),
                     'M', ELECTRIC_MOTOR_LV.getStackForm(),
                     'S', new UnificationEntry(stick, Steel),
                     'R', FLUID_REGULATOR_LV.getStackForm(),
+                    'P', ELECTRIC_PISTON_LV.getStackForm(),
                     'C', new UnificationEntry(circuit, MarkerMaterials.Tier.LV)
             );
             ModHandler.addShapedRecipe("fluidic_arm.mv.normal", FluidicArmMetaItems.FLUIDIC_ARM_MV.getStackForm(),
                     "WWW",
-                    "MSM",
-                    "RCS",
+                    "RSM",
+                    "PCS",
                     'W', new UnificationEntry(cableGtSingle, Copper),
                     'M', ELECTRIC_MOTOR_MV.getStackForm(),
                     'S', new UnificationEntry(stick, Aluminium),
                     'R', FLUID_REGULATOR_MV.getStackForm(),
+                    'P', ELECTRIC_PISTON_MV.getStackForm(),
                     'C', new UnificationEntry(circuit, MarkerMaterials.Tier.MV)
             );
             ModHandler.addShapedRecipe("fluidic_arm.hv.normal", FluidicArmMetaItems.FLUIDIC_ARM_HV.getStackForm(),
                     "WWW",
-                    "MSM",
-                    "RCS",
+                    "RSM",
+                    "PCS",
                     'W', new UnificationEntry(cableGtSingle, Gold),
                     'M', ELECTRIC_MOTOR_HV.getStackForm(),
                     'S', new UnificationEntry(stick, StainlessSteel),
                     'R', FLUID_REGULATOR_HV.getStackForm(),
+                    'P', ELECTRIC_PISTON_HV.getStackForm(),
                     'C', new UnificationEntry(circuit, MarkerMaterials.Tier.HV)
             );
             ModHandler.addShapedRecipe("fluidic_arm.ev.normal", FluidicArmMetaItems.FLUIDIC_ARM_EV.getStackForm(),
                     "WWW",
-                    "MSM",
-                    "RCS",
+                    "RSM",
+                    "PCS",
                     'W', new UnificationEntry(cableGtSingle, Aluminium),
                     'M', ELECTRIC_MOTOR_EV.getStackForm(),
                     'S', new UnificationEntry(stick, Titanium),
                     'R', FLUID_REGULATOR_EV.getStackForm(),
+                    'P', ELECTRIC_PISTON_EV.getStackForm(),
                     'C', new UnificationEntry(circuit, MarkerMaterials.Tier.EV)
             );
             ModHandler.addShapedRecipe("fluidic_arm.iv.normal", FluidicArmMetaItems.FLUIDIC_ARM_IV.getStackForm(),
                     "WWW",
-                    "MSM",
-                    "RCS",
+                    "RSM",
+                    "PCS",
                     'W', new UnificationEntry(cableGtSingle, Tungsten),
                     'M', ELECTRIC_MOTOR_IV.getStackForm(),
                     'S', new UnificationEntry(stick, TungstenSteel),
                     'R', FLUID_REGULATOR_IV.getStackForm(),
+                    'P', ELECTRIC_PISTON_IV.getStackForm(),
                     'C', new UnificationEntry(circuit, MarkerMaterials.Tier.IV)
             );
 
@@ -155,7 +160,8 @@ public class FluidicArmRecipes {
                     .input(stickLong, HSSS, 4)
                     .input(gear, HSSS)
                     .input(gearSmall, HSSS, 3)
-                    .input(ELECTRIC_MOTOR_LuV, 2)
+                    .input(ELECTRIC_MOTOR_LuV, 1)
+                    .input(ELECTRIC_PISTON_LUV)
                     .input(FLUID_REGULATOR_LUV)
                     .input(circuit, MarkerMaterials.Tier.LuV)
                     .input(circuit, MarkerMaterials.Tier.IV, 2)
@@ -174,7 +180,8 @@ public class FluidicArmRecipes {
                     .input(stickLong, Osmiridium, 4)
                     .input(gear, Osmiridium)
                     .input(gearSmall, Osmiridium, 3)
-                    .input(ELECTRIC_MOTOR_ZPM, 2)
+                    .input(ELECTRIC_MOTOR_ZPM)
+                    .input(ELECTRIC_PISTON_ZPM)
                     .input(FLUID_REGULATOR_ZPM)
                     .input(circuit, MarkerMaterials.Tier.ZPM)
                     .input(circuit, MarkerMaterials.Tier.LuV, 2)
@@ -193,7 +200,8 @@ public class FluidicArmRecipes {
                     .input(stickLong, Tritanium, 4)
                     .input(gear, Tritanium)
                     .input(gearSmall, Tritanium, 3)
-                    .input(ELECTRIC_MOTOR_UV, 2)
+                    .input(ELECTRIC_MOTOR_UV)
+                    .input(ELECTRIC_PISTON_UV)
                     .input(FLUID_REGULATOR_UV)
                     .input(circuit, MarkerMaterials.Tier.UV)
                     .input(circuit, MarkerMaterials.Tier.ZPM, 2)
