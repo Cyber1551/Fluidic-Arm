@@ -8,8 +8,12 @@ import com.gregtechceu.gtceu.api.cover.CoverDefinition;
 import com.gregtechceu.gtceu.api.cover.IIOCover;
 import com.gregtechceu.gtceu.api.cover.filter.FilterHandler;
 import com.gregtechceu.gtceu.api.cover.filter.FilterHandlers;
+import com.gregtechceu.gtceu.api.cover.filter.FluidFilter;
 import com.gregtechceu.gtceu.api.cover.filter.ItemFilter;
 import com.gregtechceu.gtceu.api.machine.ConditionalSubscriptionHandler;
+import com.gregtechceu.gtceu.api.transfer.fluid.IFluidHandlerModifiable;
+import com.gregtechceu.gtceu.api.transfer.fluid.ModifiableFluidHandlerWrapper;
+import com.gregtechceu.gtceu.common.cover.data.BucketMode;
 import com.gregtechceu.gtceu.common.cover.data.DistributionMode;
 import com.gregtechceu.gtceu.common.cover.data.ManualIOMode;
 import com.gregtechceu.gtceu.utils.GTTransferUtils;
@@ -22,6 +26,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
+import net.minecraftforge.fluids.FluidStack;
+import net.minecraftforge.fluids.capability.IFluidHandler;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.IItemHandlerModifiable;
 import net.minecraftforge.items.ItemHandlerHelper;
@@ -34,7 +40,7 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover {
 
     public final int tier;
 
-    // region Robot Arm
+    // region Robot Arm Fields
 
     public final int maxItemTransferRate;
     protected int itemsLeftToTransferLastSecond;
@@ -65,6 +71,29 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover {
 
     // endregion
 
+    // region Fluid Regulator Fields
+
+    public final int maxFluidTransferRate;
+    protected int mbLeftToTransferLastSecond;
+
+    @Persisted
+    protected int fluidTransferRate;
+
+    @Persisted
+    @DescSynced
+    @RequireRerender
+    protected IO fluidIo;
+
+    @Persisted
+    @DescSynced
+    protected BucketMode bucketMode = BucketMode.MILLI_BUCKET;
+
+    @Persisted
+    @DescSynced
+    protected final FilterHandler<FluidStack, FluidFilter> fluidFilterHandler;
+
+    // endregion
+
     protected final ConditionalSubscriptionHandler subscriptionHandler;
 
     public FluidicArmCover(CoverDefinition coverDefinition, ICoverable coverHolder, Direction attachedSide, int tier) {
@@ -72,12 +101,19 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover {
         this.tier = tier;
 
         // Robot Arm
-        this.maxItemTransferRate = 2 * (int)Math.pow(4, Math.min(tier, GTValues.LuV)); // 8, 32, 128, 512, 1024
+        this.maxItemTransferRate = FARates.itemTransferRate(tier); // 8, 32, 128, 512, 2048, 8192
         this.transferRate = maxItemTransferRate;
         this.itemsLeftToTransferLastSecond = transferRate;
         this.io = IO.OUT;
         this.distributionMode = DistributionMode.INSERT_FIRST;
         this.itemFilterHandler = FilterHandlers.item(this);
+
+        // Fluid Regulator
+        this.maxFluidTransferRate = FARates.fluidTransferRate(tier); // 64, 256, 1024, 4096, 16384, 65536
+        this.fluidIo = IO.OUT;
+        this.fluidTransferRate = maxFluidTransferRate;
+        this.mbLeftToTransferLastSecond = fluidTransferRate * 20;
+        this.fluidFilterHandler = FilterHandlers.fluid(this);
 
         this.subscriptionHandler = new ConditionalSubscriptionHandler(coverHolder, this::update, this::isSubscriptionActive);
     }
@@ -89,14 +125,20 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover {
     }
 
     @Override
-    public boolean canAttach() {
-        return super.canAttach() && getOwnItemHandler() != null;
-    }
-
-    @Override
     public void onLoad() {
         super.onLoad();
         subscriptionHandler.initialize(coverHolder.getLevel());
+    }
+
+    @Override
+    public void onRemoved() {
+        super.onRemoved();
+        subscriptionHandler.unsubscribe();
+    }
+
+    @Override
+    public boolean canAttach() {
+        return super.canAttach() && (getOwnItemHandler() != null || getOwnFluidHandler() != null);
     }
 
     @Override
@@ -105,7 +147,7 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover {
     }
 
     protected boolean isSubscriptionActive() {
-        return isWorkingEnabled && getAdjacentItemHandler() != null;
+        return isWorkingEnabled && (getAdjacentItemHandler() != null || getAdjacentFluidHandler() != null);
     }
 
     protected void update() {
@@ -113,32 +155,38 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover {
 
         if (timer % 5 == 0) {
             if (itemsLeftToTransferLastSecond > 0) {
-                var adjacent = getAdjacentItemHandler();
-                var self = getOwnItemHandler();
-
-                if (adjacent != null && self != null) {
-                    var moved = switch (io) {
-                        case IN -> doTransferItems(adjacent, self, itemsLeftToTransferLastSecond);
-                        case OUT -> doTransferItems(self, adjacent, itemsLeftToTransferLastSecond);
-                        default -> 0;
-                    };
-
-                    itemsLeftToTransferLastSecond -= moved;
-                }
+                itemsLeftToTransferLastSecond -= doTransferItems(itemsLeftToTransferLastSecond);
             }
 
-            if (timer % 20 == 0) itemsLeftToTransferLastSecond = transferRate;
+            if (mbLeftToTransferLastSecond > 0) {
+                mbLeftToTransferLastSecond -= doTransferFluids(mbLeftToTransferLastSecond);
+            }
+
+            if (timer % 20 == 0) {
+                itemsLeftToTransferLastSecond = transferRate;
+                mbLeftToTransferLastSecond = fluidTransferRate * 20;
+            }
+
             subscriptionHandler.updateSubscription();
         }
     }
 
     // region Item Transfer Logic
 
-    protected int doTransferItems(IItemHandler sourceInventory, IItemHandler targetInventory, int maxTransferAmount) {
-        return moveInventoryItems(sourceInventory, targetInventory, maxTransferAmount);
+    protected int doTransferItems(int maxTransferAmount) {
+        var adjacent = getAdjacentItemHandler();
+        var self = getOwnItemHandler();
+
+        if (adjacent == null || self == null) return 0;
+
+        return switch (io) {
+            case IN -> doTransferItemsInternal(adjacent, self, maxTransferAmount);
+            case OUT -> doTransferItemsInternal(self, adjacent, maxTransferAmount);
+            default -> 0;
+        };
     }
 
-    protected int moveInventoryItems(IItemHandler sourceInventory, IItemHandler targetInventory, int maxTransferAmount) {
+    protected int doTransferItemsInternal(IItemHandler sourceInventory, IItemHandler targetInventory, int maxTransferAmount) {
         var filter = itemFilterHandler.getFilter();
         var itemsLeftToTransfer = maxTransferAmount;
 
@@ -166,6 +214,28 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover {
 
     // endregion
 
+    // region Fluid Transfer Logic
+
+    protected int doTransferFluids(int platformTransferLimit) {
+        var adjacent = getAdjacentFluidHandler();
+        var own = getOwnFluidHandler();
+
+        if (adjacent == null || own == null) return 0;
+
+        var adjacentMod = adjacent instanceof IFluidHandlerModifiable modifiable ? modifiable : new ModifiableFluidHandlerWrapper(adjacent);
+        return switch (fluidIo) {
+            case IN -> doTransferFluidsInternal(adjacentMod, own, platformTransferLimit);
+            case OUT -> doTransferFluidsInternal(own, adjacentMod, platformTransferLimit);
+            default -> 0;
+        };
+    }
+
+    protected int doTransferFluidsInternal(IFluidHandler sourceInventory, IFluidHandler targetInventory, int platformTransferLimit) {
+        return GTTransferUtils.transferFluidsFiltered(sourceInventory, targetInventory, fluidFilterHandler.getFilter(), platformTransferLimit);
+    }
+
+    // endregion
+
     // region Item Handlers
 
     protected @Nullable IItemHandlerModifiable getOwnItemHandler() {
@@ -174,6 +244,18 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover {
 
     protected @Nullable IItemHandler getAdjacentItemHandler() {
         return GTTransferUtils.getAdjacentItemHandler(coverHolder.getLevel(), coverHolder.getPos(), attachedSide).resolve().orElse(null);
+    }
+
+    // endregion
+
+    // region Fluid Handlers
+
+    protected @Nullable IFluidHandlerModifiable getOwnFluidHandler() {
+        return coverHolder.getFluidHandlerCap(attachedSide, false);
+    }
+
+    protected @Nullable IFluidHandler getAdjacentFluidHandler() {
+        return GTTransferUtils.getAdjacentFluidHandler(coverHolder.getLevel(), coverHolder.getPos(), attachedSide).resolve().orElse(null);
     }
 
     // endregion
@@ -205,6 +287,26 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover {
 
     public FilterHandler<ItemStack, ItemFilter> getItemFilterHandler() {
         return itemFilterHandler;
+    }
+
+    // endregion
+
+    // region Fluid Regulator Getters
+
+    public IO getFluidIo() {
+        return fluidIo;
+    }
+
+    public int getFluidTransferRate() {
+        return fluidTransferRate;
+    }
+
+    public BucketMode getBucketMode() {
+        return bucketMode;
+    }
+
+    public FilterHandler<FluidStack, FluidFilter> getFluidFilterHandler() {
+        return fluidFilterHandler;
     }
 
     // endregion
