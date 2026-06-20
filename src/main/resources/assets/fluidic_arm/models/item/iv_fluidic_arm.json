@@ -1,0 +1,4 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": { "layer0": "fluidic_arm:item/iv_fluidic_arm" }
+}

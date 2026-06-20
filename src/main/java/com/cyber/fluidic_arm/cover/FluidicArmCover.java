@@ -20,9 +20,10 @@ import com.gregtechceu.gtceu.api.transfer.fluid.ModifiableFluidHandlerWrapper;
 import com.gregtechceu.gtceu.common.cover.data.BucketMode;
 import com.gregtechceu.gtceu.common.cover.data.ManualIOMode;
 import com.gregtechceu.gtceu.common.cover.data.TransferMode;
+import com.gregtechceu.gtceu.common.data.GTItems;
 import com.gregtechceu.gtceu.utils.GTTransferUtils;
 import com.lowdragmc.lowdraglib.gui.texture.GuiTextureGroup;
-import com.lowdragmc.lowdraglib.gui.texture.TextTexture;
+import com.lowdragmc.lowdraglib.gui.texture.ItemStackTexture;
 import com.lowdragmc.lowdraglib.gui.widget.*;
 import com.lowdragmc.lowdraglib.syncdata.annotation.DescSynced;
 import com.lowdragmc.lowdraglib.syncdata.annotation.Persisted;
@@ -618,16 +619,14 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
         var tabs = new TabContainer(0, 0, 176, 137);
 
         tabs.addTab(new TabButton(-17, 8, 20, 20).setTexture(
-                new GuiTextureGroup(TabContainer.TABS_LEFT.getSubTexture(0, 1f/3, 0.5f, 1f/3), new TextTexture("I")),
-                new GuiTextureGroup(TabContainer.TABS_LEFT.getSubTexture(0.5f, 1f/3, 0.5f, 1f/3), new TextTexture("I"))),
-                createItemConfigGroup()
-        );
+                new GuiTextureGroup(TabContainer.TABS_LEFT.getSubTexture(0, 1f/3, 0.5f, 1f/3), new ItemStackTexture(GTItems.ROBOT_ARM_LV.asStack()).scale(0.60f)),
+                new GuiTextureGroup(TabContainer.TABS_LEFT.getSubTexture(0.5f, 1f/3, 0.5f, 1f/3), new ItemStackTexture(GTItems.ROBOT_ARM_LV.asStack()).scale(0.65f))),
+                createItemConfigGroup());
 
         tabs.addTab(new TabButton(-17, 28, 20, 20).setTexture(
-                new GuiTextureGroup(TabContainer.TABS_LEFT.getSubTexture(0, 1f/3, 0.5f, 1f/3), new TextTexture("F")),
-                new GuiTextureGroup(TabContainer.TABS_LEFT.getSubTexture(0.5f, 1f/3, 0.5f, 1f/3), new TextTexture("F"))),
-                createFluidConfigGroup()
-        );
+                new GuiTextureGroup(TabContainer.TABS_LEFT.getSubTexture(0, 1f/3, 0.5f, 1f/3), new ItemStackTexture(GTItems.FLUID_REGULATOR_LV.asStack()).scale(0.60f)),
+                new GuiTextureGroup(TabContainer.TABS_LEFT.getSubTexture(0.5f, 1f/3, 0.5f, 1f/3), new ItemStackTexture(GTItems.FLUID_REGULATOR_LV.asStack()).scale(0.65f))),
+                createFluidConfigGroup());
 
         root.addWidget(tabs);
         return root;

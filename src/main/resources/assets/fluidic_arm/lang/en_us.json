@@ -1,0 +1,14 @@
+{
+  "item.fluidic_arm.lv_fluidic_arm": "LV Fluidic Arm",
+  "item.fluidic_arm.mv_fluidic_arm": "MV Fluidic Arm",
+  "item.fluidic_arm.hv_fluidic_arm": "HV Fluidic Arm",
+  "item.fluidic_arm.ev_fluidic_arm": "EV Fluidic Arm",
+  "item.fluidic_arm.iv_fluidic_arm": "IV Fluidic Arm",
+  "item.fluidic_arm.luv_fluidic_arm": "LuV Fluidic Arm",
+  "item.fluidic_arm.zpm_fluidic_arm": "ZPM Fluidic Arm",
+  "item.fluidic_arm.uv_fluidic_arm": "UV Fluidic Arm",
+  "cover.fluidic_arm.robot_arm.title": "Robot Arm (%s)",
+  "cover.fluidic_arm.fluid_regulator.title": "Fluid Regulator (%s)",
+  "item.fluidic_arm.tooltip.1": "§7Transfers §6Items §7and §bFluids §7through one cover",
+  "item.fluidic_arm.tooltip.2": "§8» §7Robotic Arm §8+ §7Fluid Regulator"
+}
