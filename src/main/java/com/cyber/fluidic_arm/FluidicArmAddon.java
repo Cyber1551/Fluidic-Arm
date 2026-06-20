@@ -1,5 +1,6 @@
 package com.cyber.fluidic_arm;
 
+import com.cyber.fluidic_arm.registry.FACovers;
 import com.gregtechceu.gtceu.api.addon.GTAddon;
 import com.gregtechceu.gtceu.api.addon.IGTAddon;
 import com.gregtechceu.gtceu.api.registry.registrate.GTRegistrate;
@@ -14,6 +15,11 @@ public class FluidicArmAddon implements IGTAddon {
     @Override
     public String addonModId() {
         return FluidicArm.MOD_ID;
+    }
+
+    @Override
+    public void registerCovers() {
+        FACovers.init();
     }
 
     @Override
