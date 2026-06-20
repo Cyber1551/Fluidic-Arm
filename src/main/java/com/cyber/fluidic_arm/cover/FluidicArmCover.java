@@ -1,5 +1,6 @@
 package com.cyber.fluidic_arm.cover;
 
+import com.cyber.fluidic_arm.cover.transfer.ItemTransfer;
 import com.gregtechceu.gtceu.api.GTValues;
 import com.gregtechceu.gtceu.api.capability.ICoverable;
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
@@ -14,12 +15,9 @@ import com.gregtechceu.gtceu.api.machine.ConditionalSubscriptionHandler;
 import com.gregtechceu.gtceu.api.transfer.fluid.IFluidHandlerModifiable;
 import com.gregtechceu.gtceu.api.transfer.fluid.ModifiableFluidHandlerWrapper;
 import com.gregtechceu.gtceu.common.cover.data.BucketMode;
-import com.gregtechceu.gtceu.common.cover.data.DistributionMode;
 import com.gregtechceu.gtceu.common.cover.data.ManualIOMode;
 import com.gregtechceu.gtceu.common.cover.data.TransferMode;
 import com.gregtechceu.gtceu.utils.GTTransferUtils;
-import com.gregtechceu.gtceu.utils.GTUtil;
-import com.gregtechceu.gtceu.utils.ItemStackHashStrategy;
 import com.lowdragmc.lowdraglib.gui.texture.GuiTextureGroup;
 import com.lowdragmc.lowdraglib.gui.texture.TextTexture;
 import com.lowdragmc.lowdraglib.gui.widget.*;
@@ -27,9 +25,6 @@ import com.lowdragmc.lowdraglib.syncdata.annotation.DescSynced;
 import com.lowdragmc.lowdraglib.syncdata.annotation.Persisted;
 import com.lowdragmc.lowdraglib.syncdata.annotation.RequireRerender;
 import com.lowdragmc.lowdraglib.syncdata.field.ManagedFieldHolder;
-import it.unimi.dsi.fastutil.ints.IntArrayList;
-import it.unimi.dsi.fastutil.ints.IntList;
-import it.unimi.dsi.fastutil.objects.Object2ObjectOpenCustomHashMap;
 import net.minecraft.MethodsReturnNonnullByDefault;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -40,17 +35,32 @@ import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.capability.IFluidHandler;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.IItemHandlerModifiable;
-import net.minecraftforge.items.ItemHandlerHelper;
 import org.checkerframework.checker.nullness.qual.NonNull;
 
 import javax.annotation.Nullable;
 import java.util.List;
-import java.util.Map;
+import java.util.function.Consumer;
 
 public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover {
+
+    // region Managed Fields
+
     public static final ManagedFieldHolder MANAGED_FIELD_HOLDER = new ManagedFieldHolder(FluidicArmCover.class, CoverBehavior.MANAGED_FIELD_HOLDER);
 
+    @Override
+    @MethodsReturnNonnullByDefault
+    public ManagedFieldHolder getFieldHolder() {
+        return MANAGED_FIELD_HOLDER;
+    }
+
+    // endregion
+
+    // region Shared Fields
+
     public final int tier;
+    protected final ConditionalSubscriptionHandler subscriptionHandler;
+
+    // endregion
 
     // region Robot Arm Fields
 
@@ -65,10 +75,6 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
     @DescSynced
     @RequireRerender
     protected IO io;
-
-    @Persisted
-    @DescSynced
-    protected DistributionMode distributionMode;
 
     @Persisted
     @DescSynced
@@ -116,7 +122,7 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
 
     // endregion
 
-    protected final ConditionalSubscriptionHandler subscriptionHandler;
+    // region Constructor
 
     public FluidicArmCover(CoverDefinition coverDefinition, ICoverable coverHolder, Direction attachedSide, int tier) {
         super(coverDefinition, coverHolder, attachedSide);
@@ -127,7 +133,6 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
         this.transferRate = maxItemTransferRate;
         this.itemsLeftToTransferLastSecond = transferRate;
         this.io = IO.OUT;
-        this.distributionMode = DistributionMode.INSERT_FIRST;
         this.itemFilterHandler = FilterHandlers.item(this)
                 .onFilterLoaded(f -> configureFilter())
                 .onFilterUpdated(f -> configureFilter())
@@ -146,11 +151,9 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
         this.subscriptionHandler = new ConditionalSubscriptionHandler(coverHolder, this::update, this::isSubscriptionActive);
     }
 
-    @Override
-    @MethodsReturnNonnullByDefault
-    public ManagedFieldHolder getFieldHolder() {
-        return MANAGED_FIELD_HOLDER;
-    }
+    // endregion Constructor
+
+    // region Lifecycle
 
     @Override
     public void onLoad() {
@@ -174,9 +177,9 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
         subscriptionHandler.updateSubscription();
     }
 
-    protected boolean isSubscriptionActive() {
-        return isWorkingEnabled && (getAdjacentItemHandler() != null || getAdjacentFluidHandler() != null);
-    }
+    // endregion
+
+    // region Ticking
 
     protected void update() {
         var timer = coverHolder.getOffsetTimer();
@@ -199,6 +202,12 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
         }
     }
 
+    protected boolean isSubscriptionActive() {
+        return isWorkingEnabled && (getAdjacentItemHandler() != null || getAdjacentFluidHandler() != null);
+    }
+
+    // endregion
+
     // region Item Transfer Logic
 
     protected int doTransferItems(int maxTransferAmount) {
@@ -216,14 +225,18 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
 
     protected int doTransferItemsInternal(IItemHandler sourceInventory, IItemHandler targetInventory, int maxTransferAmount) {
         return switch (transferMode) {
-            case TRANSFER_ANY -> moveInventoryItems(sourceInventory, targetInventory, maxTransferAmount);
+            case TRANSFER_ANY -> doTransferAny(sourceInventory, targetInventory, maxTransferAmount);
             case TRANSFER_EXACT -> doTransferExact(sourceInventory, targetInventory, maxTransferAmount);
             case KEEP_EXACT -> doKeepExact(sourceInventory, targetInventory, maxTransferAmount);
         };
     }
 
+    protected int doTransferAny(IItemHandler sourceInventory, IItemHandler targetInventory, int maxTransferAmount) {
+        return ItemTransfer.moveAny(sourceInventory, targetInventory, itemFilterHandler.getFilter(), maxTransferAmount);
+    }
+
     protected int doTransferExact(IItemHandler sourceInventory, IItemHandler targetInventory, int maxTransferAmount) {
-        var sourceItemAmount = countInventoryItemsByType(sourceInventory);
+        var sourceItemAmount = ItemTransfer.countByType(sourceInventory, itemFilterHandler.getFilter());
 
         var iterator = sourceItemAmount.keySet().iterator();
         while (iterator.hasNext()) {
@@ -242,7 +255,7 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
 
         for (var itemInfo : sourceItemAmount.values()) {
             if (maxTotalTransferAmount >= itemInfo.totalCount) {
-                var result = moveInventoryItemsExact(sourceInventory, targetInventory, itemInfo);
+                var result = ItemTransfer.moveExact(sourceInventory, targetInventory, itemInfo);
                 itemsTransferred += result ? itemInfo.totalCount : 0;
                 maxTotalTransferAmount -= result ? itemInfo.totalCount : 0;
             } else {
@@ -260,8 +273,9 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
     }
 
     protected int doKeepExact(IItemHandler sourceInventory, IItemHandler targetInventory, int maxTransferAmount) {
-        var targetItemAmounts = countInventoryItemsByMatchSlot(targetInventory);
-        var sourceItemAmounts = countInventoryItemsByMatchSlot(sourceInventory);
+        var filter = itemFilterHandler.getFilter();
+        var targetItemAmounts = ItemTransfer.countByMatchSlot(targetInventory, filter);
+        var sourceItemAmounts = ItemTransfer.countByMatchSlot(sourceInventory, filter);
 
         var iterator = sourceItemAmounts.keySet().iterator();
         while (iterator.hasNext()) {
@@ -277,126 +291,7 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
             }
         }
 
-        return moveInventoryItemsByGroup(sourceInventory, targetInventory, sourceItemAmounts, maxTransferAmount);
-    }
-
-    protected int moveInventoryItems(IItemHandler sourceInventory, IItemHandler targetInventory, int maxTransferAmount) {
-        var filter = itemFilterHandler.getFilter();
-        var itemsLeftToTransfer = maxTransferAmount;
-
-        for (var srcIndex = 0; srcIndex < sourceInventory.getSlots(); srcIndex++) {
-            var sourceStack = sourceInventory.extractItem(srcIndex, itemsLeftToTransfer, true);
-            if (sourceStack.isEmpty()) continue;
-            if (!filter.test(sourceStack)) continue;
-
-            var remainder = ItemHandlerHelper.insertItem(targetInventory, sourceStack, true);
-            var amountToInsert = sourceStack.getCount() - remainder.getCount();
-
-            if (amountToInsert > 0) {
-                sourceStack = sourceInventory.extractItem(srcIndex, amountToInsert, false);
-                if (!sourceStack.isEmpty()) {
-                    ItemHandlerHelper.insertItem(targetInventory, sourceStack, false);
-                    itemsLeftToTransfer -= sourceStack.getCount();
-
-                    if (itemsLeftToTransfer == 0) break;
-                }
-            }
-        }
-
-        return maxTransferAmount - itemsLeftToTransfer;
-    }
-
-    protected boolean moveInventoryItemsExact(IItemHandler sourceInventory, IItemHandler targetInventory, TypeItemInfo itemInfo) {
-        var resultStack = itemInfo.itemStack.copy();
-
-        var totalExtractedCount = extractFromSlots(sourceInventory, resultStack, itemInfo.slots, itemInfo.totalCount, true);
-        if (totalExtractedCount != itemInfo.totalCount) return false;
-
-        resultStack.setCount(totalExtractedCount);
-        var remainder = ItemHandlerHelper.insertItem(targetInventory, resultStack, true);
-        if (!remainder.isEmpty()) return false;
-
-        ItemHandlerHelper.insertItem(targetInventory, resultStack, false);
-        extractFromSlots(sourceInventory, resultStack, itemInfo.slots, itemInfo.totalCount, false);
-
-        return true;
-    }
-
-    private int extractFromSlots(IItemHandler inventory, ItemStack matchStack, IntList slots, int totalToExtract, boolean simulate) {
-        var remaining = totalToExtract;
-        for (var i = 0; i < slots.size(); i++) {
-            var extracted = inventory.extractItem(slots.getInt(i), remaining, simulate);
-            if (!extracted.isEmpty() && GTUtil.isSameItemSameTags(matchStack, extracted)) {
-                remaining -= extracted.getCount();
-            }
-            if (remaining == 0) break;
-        }
-
-        return totalToExtract - remaining; // returns how much was actually extracted
-    }
-
-    protected int moveInventoryItemsByGroup(IItemHandler sourceInventory, IItemHandler targetInventory, Map<ItemStack, GroupItemInfo> itemInfos, int maxTransferAmount) {
-        var filter = itemFilterHandler.getFilter();
-        var itemsLeftToTransfer = maxTransferAmount;
-
-        for (var i = 0; i < sourceInventory.getSlots(); i++) {
-            var itemStack = sourceInventory.getStackInSlot(i);
-            if (itemStack.isEmpty() || !filter.test(itemStack) || !itemInfos.containsKey(itemStack)) continue;
-
-            var itemInfo = itemInfos.get(itemStack);
-            var extractedStack = sourceInventory.extractItem(i, Math.min(itemInfo.totalCount, itemsLeftToTransfer), true);
-            var remainderStack = ItemHandlerHelper.insertItemStacked(targetInventory, extractedStack, true);
-            var amountToInsert = extractedStack.getCount() - remainderStack.getCount();
-
-            if (amountToInsert > 0) {
-                extractedStack = sourceInventory.extractItem(i, amountToInsert, false);
-                if (!extractedStack.isEmpty()) {
-                    ItemHandlerHelper.insertItemStacked(targetInventory, extractedStack, false);
-                    itemsLeftToTransfer -= extractedStack.getCount();
-                    itemInfo.totalCount -= extractedStack.getCount();
-
-                    if (itemInfo.totalCount == 0) {
-                        itemInfos.remove(itemStack);
-                        if (itemInfos.isEmpty()) break;
-                    }
-
-                    if (itemsLeftToTransfer == 0) break;
-                }
-            }
-        }
-
-        return maxTransferAmount - itemsLeftToTransfer;
-    }
-
-    protected Map<ItemStack, TypeItemInfo> countInventoryItemsByType(IItemHandler inventory) {
-        var filter = itemFilterHandler.getFilter();
-        Map<ItemStack, TypeItemInfo> result = new Object2ObjectOpenCustomHashMap<>(ItemStackHashStrategy.comparingAllButCount());
-
-        for (var srcIndex = 0; srcIndex < inventory.getSlots(); srcIndex++) {
-            var itemStack = inventory.getStackInSlot(srcIndex);
-            if (itemStack.isEmpty() || !filter.test(itemStack)) continue;
-
-            var itemInfo = result.computeIfAbsent(itemStack, s -> new TypeItemInfo(s, new IntArrayList(), 0));
-            itemInfo.totalCount += itemStack.getCount();
-            itemInfo.slots.add(srcIndex);
-        }
-
-        return result;
-    }
-
-    protected Map<ItemStack, GroupItemInfo> countInventoryItemsByMatchSlot(IItemHandler inventory) {
-        var filter = itemFilterHandler.getFilter();
-        Map<ItemStack, GroupItemInfo> result = new Object2ObjectOpenCustomHashMap<>(ItemStackHashStrategy.comparingAllButCount());
-
-        for (int srcIndex = 0; srcIndex < inventory.getSlots(); srcIndex++) {
-            var itemStack = inventory.getStackInSlot(srcIndex);
-            if (itemStack.isEmpty() || !filter.test(itemStack)) continue;
-
-            var itemInfo = result.computeIfAbsent(itemStack, s -> new GroupItemInfo(s, 0));
-            itemInfo.totalCount += itemStack.getCount();
-        }
-
-        return result;
+        return ItemTransfer.moveByGroup(sourceInventory, targetInventory, sourceItemAmounts, filter, maxTransferAmount);
     }
 
     private int getFilteredItemAmount(ItemStack itemStack) {
@@ -453,93 +348,7 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
 
     // endregion
 
-    // region Robot Arm Getters
-
-    @Override
-    public IO getIo() {
-        return io;
-    }
-
-    @Override
-    public int getTransferRate() {
-        return transferRate;
-    }
-
-    public DistributionMode getDistributionMode() {
-        return distributionMode;
-    }
-
-    public TransferMode getTransferMode() {
-        return transferMode;
-    }
-
-    public boolean isWorkingEnabled() {
-        return isWorkingEnabled;
-    }
-
-    public FilterHandler<ItemStack, ItemFilter> getItemFilterHandler() {
-        return itemFilterHandler;
-    }
-
-    // endregion
-
-    // region Robot Arm Setters
-
-    public void setIo(IO io) {
-        this.io = io;
-    }
-
-    public void setTransferRate(int transferRate) {
-        this.transferRate = transferRate;
-    }
-
-    public void setTransferMode(TransferMode mode) {
-        this.transferMode = mode;
-        configureStackSizeInput();
-        if (!isRemote()) configureFilter();
-    }
-
-    public void setDistributionMode(DistributionMode mode) {
-        this.distributionMode = mode;
-    }
-
-    // endregion
-
-    // region Fluid Regulator Getters
-
-    public IO getFluidIo() {
-        return fluidIo;
-    }
-
-    public int getFluidTransferRate() {
-        return fluidTransferRate;
-    }
-
-    public BucketMode getBucketMode() {
-        return bucketMode;
-    }
-
-    public FilterHandler<FluidStack, FluidFilter> getFluidFilterHandler() {
-        return fluidFilterHandler;
-    }
-
-    // endregion
-
-    // region Fluid Regulator Setters
-
-    public void setFluidIo(IO fluidIo) {
-        this.fluidIo = fluidIo;
-    }
-
-    public void setFluidTransferRate(int fluidTransferRate) {
-        this.fluidTransferRate = fluidTransferRate;
-    }
-
-    public void setBucketMode(BucketMode bucketMode) {
-        this.bucketMode = bucketMode;
-    }
-
-    // endregion
+    // region Shared Accessors
 
     @Override
     public ManualIOMode getManualIOMode() {
@@ -549,6 +358,109 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
     public void setManualIOMode(ManualIOMode mode) {
         this.manualIOMode = mode;
     }
+
+    // endregion
+
+    // region Robot Arm Accessors
+
+    @Override
+    public IO getIo() {
+        return io;
+    }
+
+    public void setIo(IO io) {
+        this.io = io;
+    }
+
+    @Override
+    public int getTransferRate() {
+        return transferRate;
+    }
+
+    public void setTransferRate(int transferRate) {
+        this.transferRate = transferRate;
+    }
+
+    public TransferMode getTransferMode() {
+        return transferMode;
+    }
+
+    public void setTransferMode(TransferMode mode) {
+        this.transferMode = mode;
+        configureStackSizeInput();
+        if (!isRemote()) configureFilter();
+    }
+
+    public boolean isWorkingEnabled() {
+        return isWorkingEnabled;
+    }
+
+    public void setIsWorkingEnabled(boolean isWorkingEnabled) {
+        this.isWorkingEnabled = isWorkingEnabled;
+    }
+
+    public FilterHandler<ItemStack, ItemFilter> getItemFilterHandler() {
+        return itemFilterHandler;
+    }
+
+    // endregion
+
+    // region Fluid Regulator Accessors
+
+    public IO getFluidIo() {
+        return fluidIo;
+    }
+
+    public void setFluidIo(IO fluidIo) {
+        this.fluidIo = fluidIo;
+    }
+
+    public int getFluidTransferRate() {
+        return fluidTransferRate;
+    }
+
+    public void setFluidTransferRate(int fluidTransferRate) {
+        this.fluidTransferRate = fluidTransferRate;
+    }
+
+    public BucketMode getBucketMode() {
+        return bucketMode;
+    }
+
+    public void setBucketMode(BucketMode bucketMode) {
+        this.bucketMode = bucketMode;
+    }
+
+    public FilterHandler<FluidStack, FluidFilter> getFluidFilterHandler() {
+        return fluidFilterHandler;
+    }
+
+    // endregion
+
+    // region Configuration
+
+    protected void configureFilter() {
+        if (itemFilterHandler.getFilter() instanceof SimpleItemFilter filter) {
+            filter.setMaxStackSize(filter.isBlackList() ? 1 : transferMode.maxStackSize);
+        }
+
+        configureStackSizeInput();
+    }
+
+    protected void configureStackSizeInput() {
+        if (stackSizeInput == null) return;
+        stackSizeInput.setVisible(shouldShowStackSize());
+        stackSizeInput.setMin(1);
+        stackSizeInput.setMax(transferMode.maxStackSize);
+    }
+
+    protected boolean shouldShowStackSize() {
+        if (transferMode == TransferMode.TRANSFER_ANY) return false;
+        if (!itemFilterHandler.isFilterPresent()) return true;
+        return !itemFilterHandler.getFilter().supportsAmounts();
+    }
+
+    // endregion
 
     // region GUI
 
@@ -581,10 +493,7 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
         this.stackSizeInput = new IntInputWidget(64, 45, 80, 20, () -> globalTransferLimit, v -> globalTransferLimit = v);
         configureStackSizeInput();
         group.addWidget(this.stackSizeInput);
-        group.addWidget(new EnumSelectorWidget<>(10, 45, 20, 20, List.of(IO.IN, IO.OUT), io, this::setIo));
-        group.addWidget(new EnumSelectorWidget<>(146, 107, 20, 20, ManualIOMode.VALUES, manualIOMode, this::setManualIOMode).setHoverTooltips("cover.universal.manual_import_export.mode.description"));
-        group.addWidget(itemFilterHandler.createFilterSlotUI(125, 108));
-        group.addWidget(itemFilterHandler.createFilterConfigUI(10, 72, 156, 60));
+        createIoAndFilterWidgets(group, io, this::setIo, itemFilterHandler);
         return group;
     }
 
@@ -592,59 +501,15 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
         var group = new WidgetGroup(0, 0, 176, 137);
         group.addWidget(new LabelWidget(10, 5, Component.translatable("cover.fluidic_arm.fluid_regulator.title", GTValues.VN[tier]).getString()));
         group.addWidget(new IntInputWidget(10, 20, 156, 20, () -> this.fluidTransferRate, this::setFluidTransferRate).setMin(1).setMax(maxFluidTransferRate));
-        group.addWidget(new EnumSelectorWidget<>(10, 45, 20, 20, List.of(IO.IN, IO.OUT), fluidIo, this::setFluidIo));
-        group.addWidget(new EnumSelectorWidget<>(146, 107, 20, 20, ManualIOMode.VALUES, manualIOMode, this::setManualIOMode).setHoverTooltips("cover.universal.manual_import_export.mode.description"));
-        group.addWidget(fluidFilterHandler.createFilterSlotUI(125, 108));
-        group.addWidget(fluidFilterHandler.createFilterConfigUI(10, 72, 156, 60));
+        createIoAndFilterWidgets(group, fluidIo, this::setFluidIo, fluidFilterHandler);
         return group;
     }
 
-    // endregion
-
-    protected void configureFilter() {
-        if (itemFilterHandler.getFilter() instanceof SimpleItemFilter filter) {
-            filter.setMaxStackSize(filter.isBlackList() ? 1 : transferMode.maxStackSize);
-        }
-
-        configureStackSizeInput();
-    }
-
-    protected void configureStackSizeInput() {
-        if (stackSizeInput == null) return;
-        stackSizeInput.setVisible(shouldShowStackSize());
-        stackSizeInput.setMin(1);
-        stackSizeInput.setMax(transferMode.maxStackSize);
-    }
-
-    protected boolean shouldShowStackSize() {
-        if (transferMode == TransferMode.TRANSFER_ANY) return false;
-        if (!itemFilterHandler.isFilterPresent()) return true;
-        return !itemFilterHandler.getFilter().supportsAmounts();
-    }
-
-
-    // region Info Classes
-
-    protected static class TypeItemInfo {
-        public final ItemStack itemStack;
-        public final IntList slots;     // every source slot holding this type
-        public int totalCount;
-
-        public TypeItemInfo(ItemStack itemStack, IntList slots, int totalCount) {
-            this.itemStack = itemStack;
-            this.slots = slots;
-            this.totalCount = totalCount;
-        }
-    }
-
-    protected static class GroupItemInfo {
-        public final ItemStack itemStack;
-        public int totalCount;
-
-        public GroupItemInfo(ItemStack itemStack, int totalCount) {
-            this.itemStack = itemStack;
-            this.totalCount = totalCount;
-        }
+    private void createIoAndFilterWidgets(WidgetGroup group, IO inputOutput, Consumer<IO> onChanged, FilterHandler<?, ?> filterHandler) {
+        group.addWidget(new EnumSelectorWidget<>(10, 45, 20, 20, List.of(IO.IN, IO.OUT), inputOutput, onChanged));
+        group.addWidget(new EnumSelectorWidget<>(146, 107, 20, 20, ManualIOMode.VALUES, manualIOMode, this::setManualIOMode).setHoverTooltips("cover.universal.manual_import_export.mode.description"));
+        group.addWidget(filterHandler.createFilterSlotUI(125, 108));
+        group.addWidget(filterHandler.createFilterConfigUI(10, 72, 156, 60));
     }
 
     // endregion
