@@ -3,6 +3,7 @@ package com.cyber.fluidic_arm.cover;
 import com.cyber.fluidic_arm.cover.transfer.FluidTransfer;
 import com.cyber.fluidic_arm.cover.transfer.ItemTransfer;
 import com.gregtechceu.gtceu.api.GTValues;
+import com.gregtechceu.gtceu.api.capability.IControllable;
 import com.gregtechceu.gtceu.api.capability.ICoverable;
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
 import com.gregtechceu.gtceu.api.cover.CoverBehavior;
@@ -43,7 +44,7 @@ import javax.annotation.Nullable;
 import java.util.List;
 import java.util.function.Consumer;
 
-public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover {
+public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover, IControllable {
 
     // region Managed Fields
 
@@ -458,8 +459,12 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
         return isWorkingEnabled;
     }
 
-    public void setWorkingEnabled(boolean isWorkingEnabled) {
-        this.isWorkingEnabled = isWorkingEnabled;
+    @Override
+    public void setWorkingEnabled(boolean isWorkingAllowed) {
+        if (this.isWorkingEnabled != isWorkingAllowed) {
+            this.isWorkingEnabled = isWorkingAllowed;
+            subscriptionHandler.updateSubscription();
+        }
     }
 
     // endregion

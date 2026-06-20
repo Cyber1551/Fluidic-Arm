@@ -1,5 +1,6 @@
 package com.cyber.fluidic_arm;
 
+import com.cyber.fluidic_arm.registry.FACreativeTab;
 import com.cyber.fluidic_arm.registry.FAItems;
 import com.gregtechceu.gtceu.api.registry.registrate.GTRegistrate;
 import net.minecraft.resources.ResourceLocation;
@@ -25,11 +26,10 @@ public class FluidicArm {
         modBus.addListener(this::commonSetup);
         LOGGER.debug("[{}] constructed", MOD_ID);
         FAItems.init();
+        FACreativeTab.init(modBus);
     }
 
-    private void commonSetup(final FMLCommonSetupEvent event) {
-
-    }
+    private void commonSetup(final FMLCommonSetupEvent event) { }
 
     public static ResourceLocation id(String path) {
         return new ResourceLocation(MOD_ID, path);

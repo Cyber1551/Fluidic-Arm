@@ -7,12 +7,41 @@ import com.gregtechceu.gtceu.api.cover.CoverDefinition;
 import com.gregtechceu.gtceu.api.registry.GTRegistries;
 import com.gregtechceu.gtceu.client.renderer.cover.IOCoverRenderer;
 
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
+
 public class FACovers {
-    public static final CoverDefinition FLUIDIC_ARM_LV = new CoverDefinition(FluidicArm.id("fluidic_arm.lv"),
-            (coverDefinition, coverHolder, attachedSide) -> new FluidicArmCover(coverDefinition, coverHolder, attachedSide, GTValues.LV),
-            () -> () -> IOCoverRenderer.PUMP_LIKE_COVER_RENDERER);
+
+    // Technically, scaling caps at LuV. However, I'm adding up to UV for future proofing
+    public static final int[] TIERS = {
+            GTValues.LV,
+            GTValues.MV,
+            GTValues.HV,
+            GTValues.EV,
+            GTValues.IV,
+            GTValues.LuV,
+            GTValues.ZPM,
+            GTValues.UV
+    };
+
+    private static final Map<Integer, CoverDefinition> DEFINITIONS = new HashMap<>();
+
+    static {
+        for (var tier : TIERS) {
+            var id = FluidicArm.id("fluidic_arm." + GTValues.VN[tier].toLowerCase(Locale.ROOT));
+            DEFINITIONS.put(tier, new CoverDefinition(id,
+                    (coverDefinition, coverHolder, attachedSide) -> new FluidicArmCover(coverDefinition, coverHolder, attachedSide, tier),
+                    () -> () -> IOCoverRenderer.PUMP_LIKE_COVER_RENDERER));
+        }
+    }
+
+    public static CoverDefinition get(int tier) { return DEFINITIONS.get(tier); }
 
     public static void init() {
-        GTRegistries.COVERS.register(FLUIDIC_ARM_LV.getId(), FLUIDIC_ARM_LV);
+        for (var tier : TIERS) {
+            var definition = DEFINITIONS.get(tier);
+            GTRegistries.COVERS.register(definition.getId(), definition);
+        }
     }
 }
