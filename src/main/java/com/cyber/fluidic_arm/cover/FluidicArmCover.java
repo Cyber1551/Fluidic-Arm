@@ -1,5 +1,6 @@
 package com.cyber.fluidic_arm.cover;
 
+import com.cyber.fluidic_arm.cover.transfer.FluidTransfer;
 import com.cyber.fluidic_arm.cover.transfer.ItemTransfer;
 import com.gregtechceu.gtceu.api.GTValues;
 import com.gregtechceu.gtceu.api.capability.ICoverable;
@@ -11,6 +12,7 @@ import com.gregtechceu.gtceu.api.cover.IUICover;
 import com.gregtechceu.gtceu.api.cover.filter.*;
 import com.gregtechceu.gtceu.api.gui.widget.EnumSelectorWidget;
 import com.gregtechceu.gtceu.api.gui.widget.IntInputWidget;
+import com.gregtechceu.gtceu.api.gui.widget.NumberInputWidget;
 import com.gregtechceu.gtceu.api.machine.ConditionalSubscriptionHandler;
 import com.gregtechceu.gtceu.api.transfer.fluid.IFluidHandlerModifiable;
 import com.gregtechceu.gtceu.api.transfer.fluid.ModifiableFluidHandlerWrapper;
@@ -60,6 +62,14 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
     public final int tier;
     protected final ConditionalSubscriptionHandler subscriptionHandler;
 
+    @Persisted
+    @DescSynced
+    protected boolean isWorkingEnabled = true;
+
+    @Persisted
+    @DescSynced
+    protected ManualIOMode manualIOMode = ManualIOMode.DISABLED;
+
     // endregion
 
     // region Robot Arm Fields
@@ -85,14 +95,6 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
 
     @Persisted
     @DescSynced
-    protected ManualIOMode manualIOMode = ManualIOMode.DISABLED;
-
-    @Persisted
-    @DescSynced
-    protected boolean isWorkingEnabled = true;
-
-    @Persisted
-    @DescSynced
     protected final FilterHandler<ItemStack, ItemFilter> itemFilterHandler;
 
     private IntInputWidget stackSizeInput;
@@ -101,8 +103,11 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
 
     // region Fluid Regulator Fields
 
+    private static final int MAX_FLUID_STACK_SIZE = 2_048_000_000;
+
     public final int maxFluidTransferRate;
     protected int mbLeftToTransferLastSecond;
+    protected int fluidTransferBuffered;
 
     @Persisted
     protected int fluidTransferRate;
@@ -114,11 +119,21 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
 
     @Persisted
     @DescSynced
-    protected BucketMode bucketMode = BucketMode.MILLI_BUCKET;
+    protected BucketMode transferBucketMode = BucketMode.MILLI_BUCKET;
+
+    @Persisted
+    @DescSynced
+    protected TransferMode fluidTransferMode = TransferMode.TRANSFER_ANY;
+
+    @Persisted
+    protected int fluidGlobalTransferLimit;
 
     @Persisted
     @DescSynced
     protected final FilterHandler<FluidStack, FluidFilter> fluidFilterHandler;
+
+    private NumberInputWidget<Integer> transferSizeInput;
+    private EnumSelectorWidget<BucketMode> transferBucketModeInput;
 
     // endregion
 
@@ -144,9 +159,9 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
         this.fluidTransferRate = maxFluidTransferRate;
         this.mbLeftToTransferLastSecond = fluidTransferRate * 20;
         this.fluidFilterHandler = FilterHandlers.fluid(this)
-                .onFilterLoaded(f -> configureFilter())
-                .onFilterUpdated(f -> configureFilter())
-                .onFilterRemoved(f -> configureFilter());
+                .onFilterLoaded(f -> configureFluidFilter())
+                .onFilterUpdated(f -> configureFluidFilter())
+                .onFilterRemoved(f -> configureFluidFilter());
 
         this.subscriptionHandler = new ConditionalSubscriptionHandler(coverHolder, this::update, this::isSubscriptionActive);
     }
@@ -225,17 +240,17 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
 
     protected int doTransferItemsInternal(IItemHandler sourceInventory, IItemHandler targetInventory, int maxTransferAmount) {
         return switch (transferMode) {
-            case TRANSFER_ANY -> doTransferAny(sourceInventory, targetInventory, maxTransferAmount);
-            case TRANSFER_EXACT -> doTransferExact(sourceInventory, targetInventory, maxTransferAmount);
-            case KEEP_EXACT -> doKeepExact(sourceInventory, targetInventory, maxTransferAmount);
+            case TRANSFER_ANY -> doTransferAnyItems(sourceInventory, targetInventory, maxTransferAmount);
+            case TRANSFER_EXACT -> doTransferExactItems(sourceInventory, targetInventory, maxTransferAmount);
+            case KEEP_EXACT -> doKeepExactItems(sourceInventory, targetInventory, maxTransferAmount);
         };
     }
 
-    protected int doTransferAny(IItemHandler sourceInventory, IItemHandler targetInventory, int maxTransferAmount) {
+    protected int doTransferAnyItems(IItemHandler sourceInventory, IItemHandler targetInventory, int maxTransferAmount) {
         return ItemTransfer.moveAny(sourceInventory, targetInventory, itemFilterHandler.getFilter(), maxTransferAmount);
     }
 
-    protected int doTransferExact(IItemHandler sourceInventory, IItemHandler targetInventory, int maxTransferAmount) {
+    protected int doTransferExactItems(IItemHandler sourceInventory, IItemHandler targetInventory, int maxTransferAmount) {
         var sourceItemAmount = ItemTransfer.countByType(sourceInventory, itemFilterHandler.getFilter());
 
         var iterator = sourceItemAmount.keySet().iterator();
@@ -272,7 +287,7 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
         return Math.min(itemsTransferred, maxTransferAmount);
     }
 
-    protected int doKeepExact(IItemHandler sourceInventory, IItemHandler targetInventory, int maxTransferAmount) {
+    protected int doKeepExactItems(IItemHandler sourceInventory, IItemHandler targetInventory, int maxTransferAmount) {
         var filter = itemFilterHandler.getFilter();
         var targetItemAmounts = ItemTransfer.countByMatchSlot(targetInventory, filter);
         var sourceItemAmounts = ItemTransfer.countByMatchSlot(sourceInventory, filter);
@@ -318,8 +333,88 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
         };
     }
 
-    protected int doTransferFluidsInternal(IFluidHandler sourceInventory, IFluidHandler targetInventory, int platformTransferLimit) {
+    protected int doTransferFluidsInternal(IFluidHandlerModifiable sourceInventory, IFluidHandlerModifiable targetInventory, int platformTransferLimit) {
+        return switch (fluidTransferMode) {
+            case TRANSFER_ANY -> doTransferAnyFluids(sourceInventory, targetInventory, platformTransferLimit);
+            case TRANSFER_EXACT -> doTransferExactFluids(sourceInventory, targetInventory, platformTransferLimit);
+            case KEEP_EXACT -> doKeepExactFluids(sourceInventory, targetInventory, platformTransferLimit);
+        };
+    }
+
+    protected int doTransferAnyFluids(IFluidHandlerModifiable sourceInventory, IFluidHandlerModifiable targetInventory, int platformTransferLimit) {
         return GTTransferUtils.transferFluidsFiltered(sourceInventory, targetInventory, fluidFilterHandler.getFilter(), platformTransferLimit);
+    }
+
+    protected int doTransferExactFluids(IFluidHandlerModifiable sourceInventory, IFluidHandlerModifiable targetInventory, int platformTransferLimit) {
+        var fluidLeftToTransfer = platformTransferLimit;
+
+        for (var tank = 0; tank < sourceInventory.getTanks(); tank++) {
+            if (fluidLeftToTransfer <= 0) break;
+
+            var sourceFluid = sourceInventory.getFluidInTank(tank).copy();
+            var supplyAmount = getFilteredFluidAmount(sourceFluid);
+            if (fluidLeftToTransfer + fluidTransferBuffered < supplyAmount) {
+                fluidTransferBuffered += fluidLeftToTransfer;
+                fluidLeftToTransfer = 0;
+                break;
+            }
+
+            if (sourceFluid.isEmpty() || supplyAmount <= 0) continue;
+            sourceFluid.setAmount(supplyAmount);
+
+            var drained = sourceInventory.drain(sourceFluid, IFluidHandler.FluidAction.SIMULATE);
+            if (drained.isEmpty() || drained.getAmount() < supplyAmount) continue;
+
+            var insertableAmount = targetInventory.fill(drained.copy(), IFluidHandler.FluidAction.SIMULATE);
+            if (insertableAmount <= 0) continue;
+
+            drained.setAmount(insertableAmount);
+            drained = sourceInventory.drain(drained, IFluidHandler.FluidAction.EXECUTE);
+            if (!drained.isEmpty()) {
+                targetInventory.fill(drained, IFluidHandler.FluidAction.EXECUTE);
+                fluidLeftToTransfer -= (drained.getAmount() - fluidTransferBuffered);
+            }
+
+            fluidTransferBuffered = 0;
+        }
+
+        return platformTransferLimit - fluidLeftToTransfer;
+    }
+
+    protected int doKeepExactFluids(IFluidHandlerModifiable sourceInventory, IFluidHandlerModifiable targetInventory, int platformTransferLimit) {
+        var fluidLeftToTransfer = platformTransferLimit;
+
+        var sourceAmounts = FluidTransfer.enumerateDistinctFluids(sourceInventory, FluidTransfer.TransferDirection.EXTRACT);
+        var destinationAmounts = FluidTransfer.enumerateDistinctFluids(targetInventory, FluidTransfer.TransferDirection.INSERT);
+
+        for (var fluidStack : sourceAmounts.keySet()) {
+            if (fluidLeftToTransfer <= 0) break;
+
+            var amountToKeep = getFilteredFluidAmount(fluidStack);
+            var amountInDest = destinationAmounts.getOrDefault(fluidStack, 0);
+            if (amountInDest >= amountToKeep) continue;
+
+            var fluidToMove = fluidStack.copy();
+            fluidToMove.setAmount(Math.min(fluidLeftToTransfer, (int) (amountToKeep - amountInDest)));
+            if (fluidToMove.getAmount() <= 0) continue;
+
+            var drained = sourceInventory.drain(fluidToMove, IFluidHandler.FluidAction.SIMULATE);
+            var fillableAmount = targetInventory.fill(drained, IFluidHandler.FluidAction.SIMULATE);
+            if (fillableAmount <= 0) continue;
+
+            fluidToMove.setAmount(Math.min(fluidToMove.getAmount(), fillableAmount));
+            drained = sourceInventory.drain(fluidToMove, IFluidHandler.FluidAction.EXECUTE);
+            var movedAmount = targetInventory.fill(drained, IFluidHandler.FluidAction.EXECUTE);
+            fluidLeftToTransfer -= movedAmount;
+        }
+
+        return platformTransferLimit - fluidLeftToTransfer;
+    }
+
+    private int getFilteredFluidAmount(FluidStack fluidStack) {
+        if (!fluidFilterHandler.isFilterPresent()) return fluidGlobalTransferLimit;
+        var filter = fluidFilterHandler.getFilter();
+        return filter.supportsAmounts() ? filter.testFluidAmount(fluidStack) : fluidGlobalTransferLimit;
     }
 
     // endregion
@@ -359,6 +454,14 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
         this.manualIOMode = mode;
     }
 
+    public boolean isWorkingEnabled() {
+        return isWorkingEnabled;
+    }
+
+    public void setWorkingEnabled(boolean isWorkingEnabled) {
+        this.isWorkingEnabled = isWorkingEnabled;
+    }
+
     // endregion
 
     // region Robot Arm Accessors
@@ -391,14 +494,6 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
         if (!isRemote()) configureFilter();
     }
 
-    public boolean isWorkingEnabled() {
-        return isWorkingEnabled;
-    }
-
-    public void setIsWorkingEnabled(boolean isWorkingEnabled) {
-        this.isWorkingEnabled = isWorkingEnabled;
-    }
-
     public FilterHandler<ItemStack, ItemFilter> getItemFilterHandler() {
         return itemFilterHandler;
     }
@@ -423,12 +518,28 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
         this.fluidTransferRate = fluidTransferRate;
     }
 
-    public BucketMode getBucketMode() {
-        return bucketMode;
+    public TransferMode getFluidTransferMode() {
+        return fluidTransferMode;
     }
 
-    public void setBucketMode(BucketMode bucketMode) {
-        this.bucketMode = bucketMode;
+    public void setFluidTransferMode(TransferMode fluidTransferMode) {
+        this.fluidTransferMode = fluidTransferMode;
+        configureTransferSizeInput();
+        if (!isRemote()) configureFluidFilter();
+    }
+
+    public BucketMode getTransferBucketMode() {
+        return transferBucketMode;
+    }
+
+    private void setTransferBucketMode(BucketMode newTransferBucketMode) {
+        var oldMultiplier = transferBucketMode.multiplier;
+        var newMultiplier = newTransferBucketMode.multiplier;
+        this.transferBucketMode = newTransferBucketMode;
+        if (transferSizeInput == null) return;
+        if (oldMultiplier > newMultiplier) transferSizeInput.setValue(getCurrentBucketModeTransferSize());
+        transferSizeInput.setMax(MAX_FLUID_STACK_SIZE / transferBucketMode.multiplier);
+        if (newMultiplier > oldMultiplier) transferSizeInput.setValue(getCurrentBucketModeTransferSize());
     }
 
     public FilterHandler<FluidStack, FluidFilter> getFluidFilterHandler() {
@@ -437,7 +548,7 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
 
     // endregion
 
-    // region Configuration
+    // region Item Configuration
 
     protected void configureFilter() {
         if (itemFilterHandler.getFilter() instanceof SimpleItemFilter filter) {
@@ -458,6 +569,38 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
         if (transferMode == TransferMode.TRANSFER_ANY) return false;
         if (!itemFilterHandler.isFilterPresent()) return true;
         return !itemFilterHandler.getFilter().supportsAmounts();
+    }
+
+    // endregion
+
+    // region Fluid Configuration
+
+    protected void configureFluidFilter() {
+        if (fluidFilterHandler.getFilter() instanceof SimpleFluidFilter filter) {
+            filter.setMaxStackSize(fluidTransferMode == TransferMode.TRANSFER_ANY ? 1 : MAX_FLUID_STACK_SIZE);
+        }
+
+        configureTransferSizeInput();
+    }
+
+    private void configureTransferSizeInput() {
+        if (transferSizeInput == null || transferBucketModeInput == null) return;
+        transferSizeInput.setVisible(shouldShowTransferSize());
+        transferBucketModeInput.setVisible(shouldShowTransferSize());
+    }
+
+    private boolean shouldShowTransferSize() {
+        if (fluidTransferMode == TransferMode.TRANSFER_ANY) return false;
+        if (!fluidFilterHandler.isFilterPresent()) return true;
+        return !fluidFilterHandler.getFilter().supportsAmounts();
+    }
+
+    private int getCurrentBucketModeTransferSize() {
+        return fluidGlobalTransferLimit / transferBucketMode.multiplier;
+    }
+
+    private void setCurrentBucketModeTransferSize(int size) {
+        fluidGlobalTransferLimit = Math.min(Math.max(size * transferBucketMode.multiplier, 0), MAX_FLUID_STACK_SIZE);
     }
 
     // endregion
@@ -501,6 +644,12 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
         var group = new WidgetGroup(0, 0, 176, 137);
         group.addWidget(new LabelWidget(10, 5, Component.translatable("cover.fluidic_arm.fluid_regulator.title", GTValues.VN[tier]).getString()));
         group.addWidget(new IntInputWidget(10, 20, 156, 20, () -> this.fluidTransferRate, this::setFluidTransferRate).setMin(1).setMax(maxFluidTransferRate));
+        group.addWidget(new EnumSelectorWidget<>(146, 45, 20, 20, TransferMode.values(), fluidTransferMode, this::setFluidTransferMode));
+        this.transferSizeInput = new IntInputWidget(35, 45, 84, 20, this::getCurrentBucketModeTransferSize, this::setCurrentBucketModeTransferSize).setMin(0).setMax(Integer.MAX_VALUE);
+        this.transferBucketModeInput = new EnumSelectorWidget<>(121, 45, 20, 20, BucketMode.values(), transferBucketMode, this::setTransferBucketMode);
+        configureTransferSizeInput();
+        group.addWidget(this.transferSizeInput);
+        group.addWidget(this.transferBucketModeInput);
         createIoAndFilterWidgets(group, fluidIo, this::setFluidIo, fluidFilterHandler);
         return group;
     }
