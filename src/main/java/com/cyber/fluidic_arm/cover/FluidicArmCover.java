@@ -7,10 +7,7 @@ import com.gregtechceu.gtceu.api.cover.CoverBehavior;
 import com.gregtechceu.gtceu.api.cover.CoverDefinition;
 import com.gregtechceu.gtceu.api.cover.IIOCover;
 import com.gregtechceu.gtceu.api.cover.IUICover;
-import com.gregtechceu.gtceu.api.cover.filter.FilterHandler;
-import com.gregtechceu.gtceu.api.cover.filter.FilterHandlers;
-import com.gregtechceu.gtceu.api.cover.filter.FluidFilter;
-import com.gregtechceu.gtceu.api.cover.filter.ItemFilter;
+import com.gregtechceu.gtceu.api.cover.filter.*;
 import com.gregtechceu.gtceu.api.gui.widget.EnumSelectorWidget;
 import com.gregtechceu.gtceu.api.gui.widget.IntInputWidget;
 import com.gregtechceu.gtceu.api.machine.ConditionalSubscriptionHandler;
@@ -19,7 +16,10 @@ import com.gregtechceu.gtceu.api.transfer.fluid.ModifiableFluidHandlerWrapper;
 import com.gregtechceu.gtceu.common.cover.data.BucketMode;
 import com.gregtechceu.gtceu.common.cover.data.DistributionMode;
 import com.gregtechceu.gtceu.common.cover.data.ManualIOMode;
+import com.gregtechceu.gtceu.common.cover.data.TransferMode;
 import com.gregtechceu.gtceu.utils.GTTransferUtils;
+import com.gregtechceu.gtceu.utils.GTUtil;
+import com.gregtechceu.gtceu.utils.ItemStackHashStrategy;
 import com.lowdragmc.lowdraglib.gui.texture.GuiTextureGroup;
 import com.lowdragmc.lowdraglib.gui.texture.TextTexture;
 import com.lowdragmc.lowdraglib.gui.widget.*;
@@ -27,6 +27,9 @@ import com.lowdragmc.lowdraglib.syncdata.annotation.DescSynced;
 import com.lowdragmc.lowdraglib.syncdata.annotation.Persisted;
 import com.lowdragmc.lowdraglib.syncdata.annotation.RequireRerender;
 import com.lowdragmc.lowdraglib.syncdata.field.ManagedFieldHolder;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.ints.IntList;
+import it.unimi.dsi.fastutil.objects.Object2ObjectOpenCustomHashMap;
 import net.minecraft.MethodsReturnNonnullByDefault;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -42,6 +45,7 @@ import org.checkerframework.checker.nullness.qual.NonNull;
 
 import javax.annotation.Nullable;
 import java.util.List;
+import java.util.Map;
 
 public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover {
     public static final ManagedFieldHolder MANAGED_FIELD_HOLDER = new ManagedFieldHolder(FluidicArmCover.class, CoverBehavior.MANAGED_FIELD_HOLDER);
@@ -52,6 +56,7 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
 
     public final int maxItemTransferRate;
     protected int itemsLeftToTransferLastSecond;
+    protected int itemsTransferBuffered;
 
     @Persisted
     protected int transferRate;
@@ -67,6 +72,13 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
 
     @Persisted
     @DescSynced
+    protected TransferMode transferMode = TransferMode.TRANSFER_ANY;
+
+    @Persisted
+    protected int globalTransferLimit;
+
+    @Persisted
+    @DescSynced
     protected ManualIOMode manualIOMode = ManualIOMode.DISABLED;
 
     @Persisted
@@ -76,6 +88,8 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
     @Persisted
     @DescSynced
     protected final FilterHandler<ItemStack, ItemFilter> itemFilterHandler;
+
+    private IntInputWidget stackSizeInput;
 
     // endregion
 
@@ -114,14 +128,20 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
         this.itemsLeftToTransferLastSecond = transferRate;
         this.io = IO.OUT;
         this.distributionMode = DistributionMode.INSERT_FIRST;
-        this.itemFilterHandler = FilterHandlers.item(this);
+        this.itemFilterHandler = FilterHandlers.item(this)
+                .onFilterLoaded(f -> configureFilter())
+                .onFilterUpdated(f -> configureFilter())
+                .onFilterRemoved(f -> configureFilter());
 
         // Fluid Regulator
         this.maxFluidTransferRate = FARates.fluidTransferRate(tier); // 64, 256, 1024, 4096, 16384, 65536
         this.fluidIo = IO.OUT;
         this.fluidTransferRate = maxFluidTransferRate;
         this.mbLeftToTransferLastSecond = fluidTransferRate * 20;
-        this.fluidFilterHandler = FilterHandlers.fluid(this);
+        this.fluidFilterHandler = FilterHandlers.fluid(this)
+                .onFilterLoaded(f -> configureFilter())
+                .onFilterUpdated(f -> configureFilter())
+                .onFilterRemoved(f -> configureFilter());
 
         this.subscriptionHandler = new ConditionalSubscriptionHandler(coverHolder, this::update, this::isSubscriptionActive);
     }
@@ -195,6 +215,72 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
     }
 
     protected int doTransferItemsInternal(IItemHandler sourceInventory, IItemHandler targetInventory, int maxTransferAmount) {
+        return switch (transferMode) {
+            case TRANSFER_ANY -> moveInventoryItems(sourceInventory, targetInventory, maxTransferAmount);
+            case TRANSFER_EXACT -> doTransferExact(sourceInventory, targetInventory, maxTransferAmount);
+            case KEEP_EXACT -> doKeepExact(sourceInventory, targetInventory, maxTransferAmount);
+        };
+    }
+
+    protected int doTransferExact(IItemHandler sourceInventory, IItemHandler targetInventory, int maxTransferAmount) {
+        var sourceItemAmount = countInventoryItemsByType(sourceInventory);
+
+        var iterator = sourceItemAmount.keySet().iterator();
+        while (iterator.hasNext()) {
+            var sourceInfo = sourceItemAmount.get(iterator.next());
+            var itemToMoveAmount = getFilteredItemAmount(sourceInfo.itemStack);
+            if (sourceInfo.totalCount >= itemToMoveAmount) {
+                sourceInfo.totalCount = itemToMoveAmount;
+            } else {
+                iterator.remove();
+            }
+        }
+
+        var itemsTransferred = 0;
+        var maxTotalTransferAmount = maxTransferAmount + itemsTransferBuffered;
+        var notEnoughTransferRate = false;
+
+        for (var itemInfo : sourceItemAmount.values()) {
+            if (maxTotalTransferAmount >= itemInfo.totalCount) {
+                var result = moveInventoryItemsExact(sourceInventory, targetInventory, itemInfo);
+                itemsTransferred += result ? itemInfo.totalCount : 0;
+                maxTotalTransferAmount -= result ? itemInfo.totalCount : 0;
+            } else {
+                notEnoughTransferRate = true;
+            }
+        }
+
+        if (itemsTransferred == 0 && notEnoughTransferRate) {
+            itemsTransferBuffered += maxTransferAmount;
+        } else {
+            itemsTransferBuffered = 0;
+        }
+
+        return Math.min(itemsTransferred, maxTransferAmount);
+    }
+
+    protected int doKeepExact(IItemHandler sourceInventory, IItemHandler targetInventory, int maxTransferAmount) {
+        var targetItemAmounts = countInventoryItemsByMatchSlot(targetInventory);
+        var sourceItemAmounts = countInventoryItemsByMatchSlot(sourceInventory);
+
+        var iterator = sourceItemAmounts.keySet().iterator();
+        while (iterator.hasNext()) {
+            var filteredItem = iterator.next();
+            var sourceInfo = sourceItemAmounts.get(filteredItem);
+            var itemToKeepAmount = getFilteredItemAmount(sourceInfo.itemStack);
+
+            var itemAmount = targetItemAmounts.containsKey(filteredItem) ? targetItemAmounts.get(filteredItem).totalCount : 0;
+            if (itemAmount < itemToKeepAmount) {
+                sourceInfo.totalCount = itemToKeepAmount - itemAmount;
+            } else {
+                iterator.remove();
+            }
+        }
+
+        return moveInventoryItemsByGroup(sourceInventory, targetInventory, sourceItemAmounts, maxTransferAmount);
+    }
+
+    protected int moveInventoryItems(IItemHandler sourceInventory, IItemHandler targetInventory, int maxTransferAmount) {
         var filter = itemFilterHandler.getFilter();
         var itemsLeftToTransfer = maxTransferAmount;
 
@@ -218,6 +304,105 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
         }
 
         return maxTransferAmount - itemsLeftToTransfer;
+    }
+
+    protected boolean moveInventoryItemsExact(IItemHandler sourceInventory, IItemHandler targetInventory, TypeItemInfo itemInfo) {
+        var resultStack = itemInfo.itemStack.copy();
+
+        var totalExtractedCount = extractFromSlots(sourceInventory, resultStack, itemInfo.slots, itemInfo.totalCount, true);
+        if (totalExtractedCount != itemInfo.totalCount) return false;
+
+        resultStack.setCount(totalExtractedCount);
+        var remainder = ItemHandlerHelper.insertItem(targetInventory, resultStack, true);
+        if (!remainder.isEmpty()) return false;
+
+        ItemHandlerHelper.insertItem(targetInventory, resultStack, false);
+        extractFromSlots(sourceInventory, resultStack, itemInfo.slots, itemInfo.totalCount, false);
+
+        return true;
+    }
+
+    private int extractFromSlots(IItemHandler inventory, ItemStack matchStack, IntList slots, int totalToExtract, boolean simulate) {
+        var remaining = totalToExtract;
+        for (var i = 0; i < slots.size(); i++) {
+            var extracted = inventory.extractItem(slots.getInt(i), remaining, simulate);
+            if (!extracted.isEmpty() && GTUtil.isSameItemSameTags(matchStack, extracted)) {
+                remaining -= extracted.getCount();
+            }
+            if (remaining == 0) break;
+        }
+
+        return totalToExtract - remaining; // returns how much was actually extracted
+    }
+
+    protected int moveInventoryItemsByGroup(IItemHandler sourceInventory, IItemHandler targetInventory, Map<ItemStack, GroupItemInfo> itemInfos, int maxTransferAmount) {
+        var filter = itemFilterHandler.getFilter();
+        var itemsLeftToTransfer = maxTransferAmount;
+
+        for (var i = 0; i < sourceInventory.getSlots(); i++) {
+            var itemStack = sourceInventory.getStackInSlot(i);
+            if (itemStack.isEmpty() || !filter.test(itemStack) || !itemInfos.containsKey(itemStack)) continue;
+
+            var itemInfo = itemInfos.get(itemStack);
+            var extractedStack = sourceInventory.extractItem(i, Math.min(itemInfo.totalCount, itemsLeftToTransfer), true);
+            var remainderStack = ItemHandlerHelper.insertItemStacked(targetInventory, extractedStack, true);
+            var amountToInsert = extractedStack.getCount() - remainderStack.getCount();
+
+            if (amountToInsert > 0) {
+                extractedStack = sourceInventory.extractItem(i, amountToInsert, false);
+                if (!extractedStack.isEmpty()) {
+                    ItemHandlerHelper.insertItemStacked(targetInventory, extractedStack, false);
+                    itemsLeftToTransfer -= extractedStack.getCount();
+                    itemInfo.totalCount -= extractedStack.getCount();
+
+                    if (itemInfo.totalCount == 0) {
+                        itemInfos.remove(itemStack);
+                        if (itemInfos.isEmpty()) break;
+                    }
+
+                    if (itemsLeftToTransfer == 0) break;
+                }
+            }
+        }
+
+        return maxTransferAmount - itemsLeftToTransfer;
+    }
+
+    protected Map<ItemStack, TypeItemInfo> countInventoryItemsByType(IItemHandler inventory) {
+        var filter = itemFilterHandler.getFilter();
+        Map<ItemStack, TypeItemInfo> result = new Object2ObjectOpenCustomHashMap<>(ItemStackHashStrategy.comparingAllButCount());
+
+        for (var srcIndex = 0; srcIndex < inventory.getSlots(); srcIndex++) {
+            var itemStack = inventory.getStackInSlot(srcIndex);
+            if (itemStack.isEmpty() || !filter.test(itemStack)) continue;
+
+            var itemInfo = result.computeIfAbsent(itemStack, s -> new TypeItemInfo(s, new IntArrayList(), 0));
+            itemInfo.totalCount += itemStack.getCount();
+            itemInfo.slots.add(srcIndex);
+        }
+
+        return result;
+    }
+
+    protected Map<ItemStack, GroupItemInfo> countInventoryItemsByMatchSlot(IItemHandler inventory) {
+        var filter = itemFilterHandler.getFilter();
+        Map<ItemStack, GroupItemInfo> result = new Object2ObjectOpenCustomHashMap<>(ItemStackHashStrategy.comparingAllButCount());
+
+        for (int srcIndex = 0; srcIndex < inventory.getSlots(); srcIndex++) {
+            var itemStack = inventory.getStackInSlot(srcIndex);
+            if (itemStack.isEmpty() || !filter.test(itemStack)) continue;
+
+            var itemInfo = result.computeIfAbsent(itemStack, s -> new GroupItemInfo(s, 0));
+            itemInfo.totalCount += itemStack.getCount();
+        }
+
+        return result;
+    }
+
+    private int getFilteredItemAmount(ItemStack itemStack) {
+        if (!itemFilterHandler.isFilterPresent()) return globalTransferLimit;
+        var filter = itemFilterHandler.getFilter();
+        return filter.supportsAmounts() ? filter.testItemCount(itemStack) : globalTransferLimit;
     }
 
     // endregion
@@ -284,6 +469,10 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
         return distributionMode;
     }
 
+    public TransferMode getTransferMode() {
+        return transferMode;
+    }
+
     public boolean isWorkingEnabled() {
         return isWorkingEnabled;
     }
@@ -302,6 +491,12 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
 
     public void setTransferRate(int transferRate) {
         this.transferRate = transferRate;
+    }
+
+    public void setTransferMode(TransferMode mode) {
+        this.transferMode = mode;
+        configureStackSizeInput();
+        if (!isRemote()) configureFilter();
     }
 
     public void setDistributionMode(DistributionMode mode) {
@@ -355,6 +550,8 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
         this.manualIOMode = mode;
     }
 
+    // region GUI
+
     @Override
     public Widget createUIWidget() {
         var root = new WidgetGroup(0, 0, 176, 137);
@@ -380,8 +577,12 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
         var group = new WidgetGroup(0, 0, 176, 137);
         group.addWidget(new LabelWidget(10, 5, Component.translatable("cover.fluidic_arm.robot_arm.title", GTValues.VN[tier]).getString()));
         group.addWidget(new IntInputWidget(10, 20, 156, 20, () -> this.transferRate, this::setTransferRate).setMin(1).setMax(maxItemTransferRate));
+        group.addWidget(new EnumSelectorWidget<>(146, 45, 20, 20, TransferMode.values(), transferMode, this::setTransferMode));
+        this.stackSizeInput = new IntInputWidget(64, 45, 80, 20, () -> globalTransferLimit, v -> globalTransferLimit = v);
+        configureStackSizeInput();
+        group.addWidget(this.stackSizeInput);
         group.addWidget(new EnumSelectorWidget<>(10, 45, 20, 20, List.of(IO.IN, IO.OUT), io, this::setIo));
-        group.addWidget(new EnumSelectorWidget<>(146, 107, 20, 20, ManualIOMode.VALUES, manualIOMode, this::setManualIOMode)).setHoverTooltips("cover.universal.manual_import_export.mode.description");
+        group.addWidget(new EnumSelectorWidget<>(146, 107, 20, 20, ManualIOMode.VALUES, manualIOMode, this::setManualIOMode).setHoverTooltips("cover.universal.manual_import_export.mode.description"));
         group.addWidget(itemFilterHandler.createFilterSlotUI(125, 108));
         group.addWidget(itemFilterHandler.createFilterConfigUI(10, 72, 156, 60));
         return group;
@@ -397,4 +598,54 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
         group.addWidget(fluidFilterHandler.createFilterConfigUI(10, 72, 156, 60));
         return group;
     }
+
+    // endregion
+
+    protected void configureFilter() {
+        if (itemFilterHandler.getFilter() instanceof SimpleItemFilter filter) {
+            filter.setMaxStackSize(filter.isBlackList() ? 1 : transferMode.maxStackSize);
+        }
+
+        configureStackSizeInput();
+    }
+
+    protected void configureStackSizeInput() {
+        if (stackSizeInput == null) return;
+        stackSizeInput.setVisible(shouldShowStackSize());
+        stackSizeInput.setMin(1);
+        stackSizeInput.setMax(transferMode.maxStackSize);
+    }
+
+    protected boolean shouldShowStackSize() {
+        if (transferMode == TransferMode.TRANSFER_ANY) return false;
+        if (!itemFilterHandler.isFilterPresent()) return true;
+        return !itemFilterHandler.getFilter().supportsAmounts();
+    }
+
+
+    // region Info Classes
+
+    protected static class TypeItemInfo {
+        public final ItemStack itemStack;
+        public final IntList slots;     // every source slot holding this type
+        public int totalCount;
+
+        public TypeItemInfo(ItemStack itemStack, IntList slots, int totalCount) {
+            this.itemStack = itemStack;
+            this.slots = slots;
+            this.totalCount = totalCount;
+        }
+    }
+
+    protected static class GroupItemInfo {
+        public final ItemStack itemStack;
+        public int totalCount;
+
+        public GroupItemInfo(ItemStack itemStack, int totalCount) {
+            this.itemStack = itemStack;
+            this.totalCount = totalCount;
+        }
+    }
+
+    // endregion
 }
