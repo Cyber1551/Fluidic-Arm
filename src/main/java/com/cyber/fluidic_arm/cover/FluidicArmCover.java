@@ -6,10 +6,13 @@ import com.gregtechceu.gtceu.api.capability.recipe.IO;
 import com.gregtechceu.gtceu.api.cover.CoverBehavior;
 import com.gregtechceu.gtceu.api.cover.CoverDefinition;
 import com.gregtechceu.gtceu.api.cover.IIOCover;
+import com.gregtechceu.gtceu.api.cover.IUICover;
 import com.gregtechceu.gtceu.api.cover.filter.FilterHandler;
 import com.gregtechceu.gtceu.api.cover.filter.FilterHandlers;
 import com.gregtechceu.gtceu.api.cover.filter.FluidFilter;
 import com.gregtechceu.gtceu.api.cover.filter.ItemFilter;
+import com.gregtechceu.gtceu.api.gui.widget.EnumSelectorWidget;
+import com.gregtechceu.gtceu.api.gui.widget.IntInputWidget;
 import com.gregtechceu.gtceu.api.machine.ConditionalSubscriptionHandler;
 import com.gregtechceu.gtceu.api.transfer.fluid.IFluidHandlerModifiable;
 import com.gregtechceu.gtceu.api.transfer.fluid.ModifiableFluidHandlerWrapper;
@@ -17,6 +20,9 @@ import com.gregtechceu.gtceu.common.cover.data.BucketMode;
 import com.gregtechceu.gtceu.common.cover.data.DistributionMode;
 import com.gregtechceu.gtceu.common.cover.data.ManualIOMode;
 import com.gregtechceu.gtceu.utils.GTTransferUtils;
+import com.lowdragmc.lowdraglib.gui.texture.GuiTextureGroup;
+import com.lowdragmc.lowdraglib.gui.texture.TextTexture;
+import com.lowdragmc.lowdraglib.gui.widget.*;
 import com.lowdragmc.lowdraglib.syncdata.annotation.DescSynced;
 import com.lowdragmc.lowdraglib.syncdata.annotation.Persisted;
 import com.lowdragmc.lowdraglib.syncdata.annotation.RequireRerender;
@@ -24,6 +30,7 @@ import com.lowdragmc.lowdraglib.syncdata.field.ManagedFieldHolder;
 import net.minecraft.MethodsReturnNonnullByDefault;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 import net.minecraftforge.fluids.FluidStack;
@@ -34,8 +41,9 @@ import net.minecraftforge.items.ItemHandlerHelper;
 import org.checkerframework.checker.nullness.qual.NonNull;
 
 import javax.annotation.Nullable;
+import java.util.List;
 
-public class FluidicArmCover extends CoverBehavior implements IIOCover {
+public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover {
     public static final ManagedFieldHolder MANAGED_FIELD_HOLDER = new ManagedFieldHolder(FluidicArmCover.class, CoverBehavior.MANAGED_FIELD_HOLDER);
 
     public final int tier;
@@ -268,11 +276,6 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover {
     }
 
     @Override
-    public ManualIOMode getManualIOMode() {
-        return manualIOMode;
-    }
-
-    @Override
     public int getTransferRate() {
         return transferRate;
     }
@@ -287,6 +290,22 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover {
 
     public FilterHandler<ItemStack, ItemFilter> getItemFilterHandler() {
         return itemFilterHandler;
+    }
+
+    // endregion
+
+    // region Robot Arm Setters
+
+    public void setIo(IO io) {
+        this.io = io;
+    }
+
+    public void setTransferRate(int transferRate) {
+        this.transferRate = transferRate;
+    }
+
+    public void setDistributionMode(DistributionMode mode) {
+        this.distributionMode = mode;
     }
 
     // endregion
@@ -310,4 +329,72 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover {
     }
 
     // endregion
+
+    // region Fluid Regulator Setters
+
+    public void setFluidIo(IO fluidIo) {
+        this.fluidIo = fluidIo;
+    }
+
+    public void setFluidTransferRate(int fluidTransferRate) {
+        this.fluidTransferRate = fluidTransferRate;
+    }
+
+    public void setBucketMode(BucketMode bucketMode) {
+        this.bucketMode = bucketMode;
+    }
+
+    // endregion
+
+    @Override
+    public ManualIOMode getManualIOMode() {
+        return manualIOMode;
+    }
+
+    public void setManualIOMode(ManualIOMode mode) {
+        this.manualIOMode = mode;
+    }
+
+    @Override
+    public Widget createUIWidget() {
+        var root = new WidgetGroup(0, 0, 176, 137);
+        var tabs = new TabContainer(0, 0, 176, 137);
+
+        tabs.addTab(new TabButton(-17, 8, 20, 20).setTexture(
+                new GuiTextureGroup(TabContainer.TABS_LEFT.getSubTexture(0, 1f/3, 0.5f, 1f/3), new TextTexture("I")),
+                new GuiTextureGroup(TabContainer.TABS_LEFT.getSubTexture(0.5f, 1f/3, 0.5f, 1f/3), new TextTexture("I"))),
+                createItemConfigGroup()
+        );
+
+        tabs.addTab(new TabButton(-17, 28, 20, 20).setTexture(
+                new GuiTextureGroup(TabContainer.TABS_LEFT.getSubTexture(0, 1f/3, 0.5f, 1f/3), new TextTexture("F")),
+                new GuiTextureGroup(TabContainer.TABS_LEFT.getSubTexture(0.5f, 1f/3, 0.5f, 1f/3), new TextTexture("F"))),
+                createFluidConfigGroup()
+        );
+
+        root.addWidget(tabs);
+        return root;
+    }
+
+    private WidgetGroup createItemConfigGroup() {
+        var group = new WidgetGroup(0, 0, 176, 137);
+        group.addWidget(new LabelWidget(10, 5, Component.translatable("cover.fluidic_arm.robot_arm.title", GTValues.VN[tier]).getString()));
+        group.addWidget(new IntInputWidget(10, 20, 156, 20, () -> this.transferRate, this::setTransferRate).setMin(1).setMax(maxItemTransferRate));
+        group.addWidget(new EnumSelectorWidget<>(10, 45, 20, 20, List.of(IO.IN, IO.OUT), io, this::setIo));
+        group.addWidget(new EnumSelectorWidget<>(146, 107, 20, 20, ManualIOMode.VALUES, manualIOMode, this::setManualIOMode)).setHoverTooltips("cover.universal.manual_import_export.mode.description");
+        group.addWidget(itemFilterHandler.createFilterSlotUI(125, 108));
+        group.addWidget(itemFilterHandler.createFilterConfigUI(10, 72, 156, 60));
+        return group;
+    }
+
+    private WidgetGroup createFluidConfigGroup() {
+        var group = new WidgetGroup(0, 0, 176, 137);
+        group.addWidget(new LabelWidget(10, 5, Component.translatable("cover.fluidic_arm.fluid_regulator.title", GTValues.VN[tier]).getString()));
+        group.addWidget(new IntInputWidget(10, 20, 156, 20, () -> this.fluidTransferRate, this::setFluidTransferRate).setMin(1).setMax(maxFluidTransferRate));
+        group.addWidget(new EnumSelectorWidget<>(10, 45, 20, 20, List.of(IO.IN, IO.OUT), fluidIo, this::setFluidIo));
+        group.addWidget(new EnumSelectorWidget<>(146, 107, 20, 20, ManualIOMode.VALUES, manualIOMode, this::setManualIOMode).setHoverTooltips("cover.universal.manual_import_export.mode.description"));
+        group.addWidget(fluidFilterHandler.createFilterSlotUI(125, 108));
+        group.addWidget(fluidFilterHandler.createFilterConfigUI(10, 72, 156, 60));
+        return group;
+    }
 }
