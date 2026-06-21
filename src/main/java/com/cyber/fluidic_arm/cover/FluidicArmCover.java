@@ -46,7 +46,6 @@ import java.util.List;
 import java.util.function.Consumer;
 
 public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover, IControllable {
-
     // region Managed Fields
 
     public static final ManagedFieldHolder MANAGED_FIELD_HOLDER = new ManagedFieldHolder(FluidicArmCover.class, CoverBehavior.MANAGED_FIELD_HOLDER);

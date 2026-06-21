@@ -1,9 +1,13 @@
 package com.cyber.fluidic_arm;
 
+import com.cyber.fluidic_arm.recipe.FARecipes;
 import com.cyber.fluidic_arm.registry.FACovers;
 import com.gregtechceu.gtceu.api.addon.GTAddon;
 import com.gregtechceu.gtceu.api.addon.IGTAddon;
 import com.gregtechceu.gtceu.api.registry.registrate.GTRegistrate;
+import net.minecraft.data.recipes.FinishedRecipe;
+
+import java.util.function.Consumer;
 
 @GTAddon
 public class FluidicArmAddon implements IGTAddon {
@@ -20,6 +24,11 @@ public class FluidicArmAddon implements IGTAddon {
     @Override
     public void registerCovers() {
         FACovers.init();
+    }
+
+    @Override
+    public void addRecipes(Consumer<FinishedRecipe> provider) {
+        FARecipes.addRecipes(provider);
     }
 
     @Override

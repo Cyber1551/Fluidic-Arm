@@ -12,7 +12,6 @@ import java.util.Locale;
 import java.util.Map;
 
 public class FACovers {
-
     // Technically, scaling caps at LuV. However, I'm adding up to UV for future proofing
     public static final int[] TIERS = {
             GTValues.LV,

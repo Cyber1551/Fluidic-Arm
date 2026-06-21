@@ -1,5 +1,6 @@
 package com.cyber.fluidic_arm;
 
+import com.cyber.fluidic_arm.config.FAConfig;
 import com.cyber.fluidic_arm.registry.FACreativeTab;
 import com.cyber.fluidic_arm.registry.FAItems;
 import com.gregtechceu.gtceu.api.registry.registrate.GTRegistrate;
@@ -14,7 +15,6 @@ import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 
 @Mod(FluidicArm.MOD_ID)
 public class FluidicArm {
-
     public static final String MOD_ID = "fluidic_arm";
     public static final Logger LOGGER = LogUtils.getLogger();
 
@@ -24,7 +24,7 @@ public class FluidicArm {
         IEventBus modBus = FMLJavaModLoadingContext.get().getModEventBus();
         REGISTRATE.registerRegistrate();
         modBus.addListener(this::commonSetup);
-        LOGGER.debug("[{}] constructed", MOD_ID);
+        FAConfig.register();
         FAItems.init();
         FACreativeTab.init(modBus);
     }
