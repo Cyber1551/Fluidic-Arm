@@ -275,27 +275,31 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
             }
         }
 
-        var itemsTransferred = 0;
-        var maxTotalTransferAmount = maxTransferAmount + itemsTransferBuffered;
-        var notEnoughTransferRate = false;
+        var itemsLeftToTransfer = maxTransferAmount;
 
         for (var itemInfo : sourceItemAmount.values()) {
-            if (maxTotalTransferAmount >= itemInfo.totalCount) {
-                var result = ItemTransfer.moveExact(sourceInventory, targetInventory, itemInfo);
-                itemsTransferred += result ? itemInfo.totalCount : 0;
-                maxTotalTransferAmount -= result ? itemInfo.totalCount : 0;
-            } else {
-                notEnoughTransferRate = true;
-            }
-        }
+            if (itemsLeftToTransfer <= 0) break;
 
-        if (itemsTransferred == 0 && notEnoughTransferRate) {
-            itemsTransferBuffered += maxTransferAmount;
-        } else {
+            var batchSize = itemInfo.totalCount;
+            if (batchSize <= 0) continue;
+
+            // can't afford a full batch yet, bank the leftover budget and stop
+            if (itemsLeftToTransfer + itemsTransferBuffered < batchSize) {
+                itemsTransferBuffered += itemsLeftToTransfer;
+                itemsLeftToTransfer = 0;
+                break;
+            }
+
+            // all-or-nothing move; if the target can't take the full batch, keep the buffer and try the next type
+            if (!ItemTransfer.moveExact(sourceInventory, targetInventory, itemInfo)) {
+                continue;
+            }
+
+            itemsLeftToTransfer -= (batchSize - itemsTransferBuffered);
             itemsTransferBuffered = 0;
         }
 
-        return Math.min(itemsTransferred, maxTransferAmount);
+        return maxTransferAmount - itemsLeftToTransfer;
     }
 
     protected int doKeepExactItems(IItemHandler sourceInventory, IItemHandler targetInventory, int maxTransferAmount) {
