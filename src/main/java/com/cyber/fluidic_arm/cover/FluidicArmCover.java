@@ -157,7 +157,7 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
         // Robot Arm
         this.maxItemTransferRate = FARates.itemTransferRate(tier); // 8, 32, 128, 512, 2048, 8192
         this.transferRate = maxItemTransferRate;
-        this.itemsLeftToTransferLastSecond = transferRate;
+        this.itemsLeftToTransferLastSecond = 0;
         this.io = IO.OUT;
         this.itemFilterHandler = FilterHandlers.item(this)
                 .onFilterLoaded(f -> configureFilter())
@@ -168,7 +168,7 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
         this.maxFluidTransferRate = FARates.fluidTransferRate(tier); // 64, 256, 1024, 4096, 16384, 65536
         this.fluidIo = IO.OUT;
         this.fluidTransferRate = maxFluidTransferRate;
-        this.mbLeftToTransferLastSecond = fluidTransferRate * 20;
+        this.mbLeftToTransferLastSecond = 0;
         this.fluidFilterHandler = FilterHandlers.fluid(this)
                 .onFilterLoaded(f -> configureFluidFilter())
                 .onFilterUpdated(f -> configureFluidFilter())
