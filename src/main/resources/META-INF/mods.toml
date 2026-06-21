@@ -29,7 +29,7 @@ side = "BOTH"
 [[dependencies.${mod_id}]]
 modId = "gtceu"
 mandatory = true
-versionRange = "[1.0,)"
+versionRange = "[7.4.1,)"
 # Load AFTER GregTech so its classes exist when this mod registers its cover
 ordering = "AFTER"
 side = "BOTH"

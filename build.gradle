@@ -114,6 +114,7 @@ tasks.named('processResources', ProcessResources).configure {
     filesMatching('META-INF/mods.toml') {
         expand replacements
     }
+    exclude '**/.DS_Store'
 }
 
 tasks.withType(JavaCompile).configureEach {

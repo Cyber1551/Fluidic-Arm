@@ -15,8 +15,10 @@ import com.gregtechceu.gtceu.api.gui.widget.EnumSelectorWidget;
 import com.gregtechceu.gtceu.api.gui.widget.IntInputWidget;
 import com.gregtechceu.gtceu.api.gui.widget.NumberInputWidget;
 import com.gregtechceu.gtceu.api.machine.ConditionalSubscriptionHandler;
+import com.gregtechceu.gtceu.api.transfer.fluid.FluidHandlerDelegate;
 import com.gregtechceu.gtceu.api.transfer.fluid.IFluidHandlerModifiable;
 import com.gregtechceu.gtceu.api.transfer.fluid.ModifiableFluidHandlerWrapper;
+import com.gregtechceu.gtceu.api.transfer.item.ItemHandlerDelegate;
 import com.gregtechceu.gtceu.common.cover.data.BucketMode;
 import com.gregtechceu.gtceu.common.cover.data.ManualIOMode;
 import com.gregtechceu.gtceu.common.cover.data.TransferMode;
@@ -42,6 +44,7 @@ import net.minecraftforge.items.IItemHandlerModifiable;
 import org.checkerframework.checker.nullness.qual.NonNull;
 
 import javax.annotation.Nullable;
+import java.util.Arrays;
 import java.util.List;
 import java.util.function.Consumer;
 
@@ -99,6 +102,7 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
     protected final FilterHandler<ItemStack, ItemFilter> itemFilterHandler;
 
     private IntInputWidget stackSizeInput;
+    private CoverableItemHandlerWrapper itemHandlerWrapper;
 
     // endregion
 
@@ -120,6 +124,10 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
 
     @Persisted
     @DescSynced
+    protected BucketMode bucketMode = BucketMode.MILLI_BUCKET;
+
+    @Persisted
+    @DescSynced
     protected BucketMode transferBucketMode = BucketMode.MILLI_BUCKET;
 
     @Persisted
@@ -133,8 +141,10 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
     @DescSynced
     protected final FilterHandler<FluidStack, FluidFilter> fluidFilterHandler;
 
+    private NumberInputWidget<Integer> fluidRateInput;
     private NumberInputWidget<Integer> transferSizeInput;
     private EnumSelectorWidget<BucketMode> transferBucketModeInput;
+    private CoverableFluidHandlerWrapper fluidHandlerWrapper;
 
     // endregion
 
@@ -367,7 +377,7 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
             if (drained.isEmpty() || drained.getAmount() < supplyAmount) continue;
 
             var insertableAmount = targetInventory.fill(drained.copy(), IFluidHandler.FluidAction.SIMULATE);
-            if (insertableAmount <= 0) continue;
+            if (insertableAmount != supplyAmount) continue;
 
             drained.setAmount(insertableAmount);
             drained = sourceInventory.drain(drained, IFluidHandler.FluidAction.EXECUTE);
@@ -430,6 +440,45 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
         return GTTransferUtils.getAdjacentItemHandler(coverHolder.getLevel(), coverHolder.getPos(), attachedSide).resolve().orElse(null);
     }
 
+    @Override
+    public IItemHandlerModifiable getItemHandlerCap(@Nullable IItemHandlerModifiable defaultValue) {
+        if (defaultValue == null) return null;
+        if (itemHandlerWrapper == null || itemHandlerWrapper.delegate != defaultValue) {
+            this.itemHandlerWrapper = new CoverableItemHandlerWrapper(defaultValue);
+        }
+
+        return itemHandlerWrapper;
+    }
+
+    private class CoverableItemHandlerWrapper extends ItemHandlerDelegate {
+        public CoverableItemHandlerWrapper(IItemHandlerModifiable delegate) { super(delegate); }
+
+        @Override
+        @NonNull
+        public ItemStack insertItem(int slot, @NonNull ItemStack stack, boolean simulate) {
+            if (io == IO.OUT) {
+                if (manualIOMode == ManualIOMode.DISABLED) return stack;
+                if (manualIOMode == ManualIOMode.UNFILTERED) return super.insertItem(slot, stack, simulate);
+            }
+
+            if (!itemFilterHandler.test(stack)) return stack;
+            return super.insertItem(slot, stack, simulate);
+        }
+
+        @Override
+        @NonNull
+        public ItemStack extractItem(int slot, int amount, boolean simulate) {
+            if (io == IO.IN) {
+                if (manualIOMode == ManualIOMode.DISABLED) return ItemStack.EMPTY;
+                if (manualIOMode == ManualIOMode.UNFILTERED) return super.extractItem(slot, amount, simulate);
+            }
+
+            var result = super.extractItem(slot, amount, true);
+            if (result.isEmpty() || !itemFilterHandler.test(result)) return ItemStack.EMPTY;
+            return simulate ? result : super.extractItem(slot, amount, false);
+        }
+    }
+
     // endregion
 
     // region Fluid Handlers
@@ -440,6 +489,43 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
 
     protected @Nullable IFluidHandler getAdjacentFluidHandler() {
         return GTTransferUtils.getAdjacentFluidHandler(coverHolder.getLevel(), coverHolder.getPos(), attachedSide).resolve().orElse(null);
+    }
+
+    @Override
+    public IFluidHandlerModifiable getFluidHandlerCap(@Nullable IFluidHandlerModifiable defaultValue) {
+        if (defaultValue == null) return null;
+        if (fluidHandlerWrapper == null || fluidHandlerWrapper.delegate != defaultValue) {
+            this.fluidHandlerWrapper = new CoverableFluidHandlerWrapper(defaultValue);
+        }
+
+        return fluidHandlerWrapper;
+    }
+
+    private class CoverableFluidHandlerWrapper extends FluidHandlerDelegate {
+        public CoverableFluidHandlerWrapper(IFluidHandlerModifiable delegate) { super(delegate); }
+
+        @Override
+        public int fill(@NonNull FluidStack resource, @NonNull FluidAction action) {
+            if (fluidIo == IO.OUT) {
+                if (manualIOMode == ManualIOMode.DISABLED) return 0;
+                if (manualIOMode == ManualIOMode.UNFILTERED) return super.fill(resource, action);
+            }
+
+            if (!fluidFilterHandler.test(resource)) return 0;
+            return super.fill(resource, action);
+        }
+
+        @Override
+        @MethodsReturnNonnullByDefault
+        public FluidStack drain(@NonNull FluidStack resource, @NonNull FluidAction action) {
+            if (fluidIo == IO.IN) {
+                if (manualIOMode == ManualIOMode.DISABLED) return FluidStack.EMPTY;
+                if (manualIOMode == ManualIOMode.UNFILTERED) return super.drain(resource, action);
+            }
+
+            if (!fluidFilterHandler.test(resource)) return FluidStack.EMPTY;
+            return super.drain(resource, action);
+        }
     }
 
     // endregion
@@ -533,6 +619,20 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
         if (!isRemote()) configureFluidFilter();
     }
 
+    public BucketMode getBucketMode() {
+        return bucketMode;
+    }
+
+    public void setBucketMode(BucketMode bucketMode) {
+        var oldMultiplier = this.bucketMode.multiplier;
+        var newMultiplier = bucketMode.multiplier;
+        this.bucketMode = bucketMode;
+        if (fluidRateInput == null) return;
+        if (oldMultiplier > newMultiplier) fluidRateInput.setValue(getCurrentBucketModeTransferRate());
+        fluidRateInput.setMax(maxFluidTransferRate / bucketMode.multiplier);
+        if (newMultiplier > oldMultiplier) fluidRateInput.setValue(getCurrentBucketModeTransferRate());
+    }
+
     public BucketMode getTransferBucketMode() {
         return transferBucketMode;
     }
@@ -600,6 +700,14 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
         return !fluidFilterHandler.getFilter().supportsAmounts();
     }
 
+    private int getCurrentBucketModeTransferRate() {
+        return fluidTransferRate / bucketMode.multiplier;
+    }
+
+    private void setCurrentBucketModeTransferRate(int rate) {
+        setFluidTransferRate(Math.min(Math.max(rate * bucketMode.multiplier, 1), maxFluidTransferRate));
+    }
+
     private int getCurrentBucketModeTransferSize() {
         return fluidGlobalTransferLimit / transferBucketMode.multiplier;
     }
@@ -628,6 +736,7 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
                 createFluidConfigGroup());
 
         root.addWidget(tabs);
+        root.addWidget(new EnumSelectorWidget<>(146, 107, 20, 20, ManualIOMode.VALUES, manualIOMode, this::setManualIOMode).setHoverTooltips("cover.universal.manual_import_export.mode.description"));
         return root;
     }
 
@@ -646,8 +755,11 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
     private WidgetGroup createFluidConfigGroup() {
         var group = new WidgetGroup(0, 0, 176, 137);
         group.addWidget(new LabelWidget(10, 5, Component.translatable("cover.fluidic_arm.fluid_regulator.title", GTValues.VN[tier]).getString()));
-        group.addWidget(new IntInputWidget(10, 20, 156, 20, () -> this.fluidTransferRate, this::setFluidTransferRate).setMin(1).setMax(maxFluidTransferRate));
         group.addWidget(new EnumSelectorWidget<>(146, 45, 20, 20, TransferMode.values(), fluidTransferMode, this::setFluidTransferMode));
+        this.fluidRateInput = new IntInputWidget(10, 20, 134, 20, this::getCurrentBucketModeTransferRate, this::setCurrentBucketModeTransferRate).setMin(1);
+        setBucketMode(this.bucketMode);
+        group.addWidget(this.fluidRateInput);
+        group.addWidget(new EnumSelectorWidget<>(146, 20, 20, 20, Arrays.stream(BucketMode.values()).filter(m -> m.multiplier <= maxFluidTransferRate).toList(), bucketMode, this::setBucketMode));
         this.transferSizeInput = new IntInputWidget(35, 45, 84, 20, this::getCurrentBucketModeTransferSize, this::setCurrentBucketModeTransferSize).setMin(0).setMax(Integer.MAX_VALUE);
         this.transferBucketModeInput = new EnumSelectorWidget<>(121, 45, 20, 20, BucketMode.values(), transferBucketMode, this::setTransferBucketMode);
         configureTransferSizeInput();
@@ -659,7 +771,6 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
 
     private void createIoAndFilterWidgets(WidgetGroup group, IO inputOutput, Consumer<IO> onChanged, FilterHandler<?, ?> filterHandler) {
         group.addWidget(new EnumSelectorWidget<>(10, 45, 20, 20, List.of(IO.IN, IO.OUT), inputOutput, onChanged));
-        group.addWidget(new EnumSelectorWidget<>(146, 107, 20, 20, ManualIOMode.VALUES, manualIOMode, this::setManualIOMode).setHoverTooltips("cover.universal.manual_import_export.mode.description"));
         group.addWidget(filterHandler.createFilterSlotUI(125, 108));
         group.addWidget(filterHandler.createFilterConfigUI(10, 72, 156, 60));
     }
