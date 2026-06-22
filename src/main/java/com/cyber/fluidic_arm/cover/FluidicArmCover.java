@@ -195,7 +195,12 @@ public class FluidicArmCover extends CoverBehavior implements IIOCover, IUICover
 
     @Override
     public boolean canAttach() {
-        return super.canAttach() && (getOwnItemHandler() != null || getOwnFluidHandler() != null);
+        var itemHandler = getOwnItemHandler();
+        var fluidHandler = getOwnFluidHandler();
+
+        var supportsItems = itemHandler != null && itemHandler.getSlots() > 0;
+        var supportsFluids = fluidHandler != null && fluidHandler.getTanks() > 0;
+        return super.canAttach() && supportsItems && supportsFluids;
     }
 
     @Override
